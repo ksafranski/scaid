@@ -7,6 +7,7 @@ import {
   ChatCircleDots,
   Code,
   ImageSquare,
+  CheckCircle,
   Eye,
   Plus,
   Question,
@@ -45,7 +46,7 @@ interface Design {
 
 type Message =
   | { kind: "you"; text: string; imageUrl?: string }
-  | { kind: "scaid"; design: Design; describeObject?: boolean }
+  | { kind: "scaid"; design: Design; describeObject?: boolean; done?: boolean }
   /** A turn that asked instead of building, because the answer changes what the object is. */
   | { kind: "question"; question: string; options: AgentChoice[] }
   /** Something the checks noticed and thought you'd want to know. Not an error. */
@@ -95,6 +96,39 @@ const IDEAS = [
   "a ring stand",
   "a bowl with a wavy rim",
 ];
+
+/**
+ * Ways to say you're finished.
+ *
+ * The agent offers three directions and never one of them is "stop" — that would spend a
+ * suggestion on the one option it can't judge. This is the studio's own way out, and it's
+ * picked at random so a long session doesn't read like the same button over and over.
+ */
+const DONE_LABELS = [
+  "Looks good!",
+  "All done!",
+  "That's the one",
+  "Happy with that",
+  "Nailed it",
+  "That'll do nicely",
+  "Perfect, I'm done",
+  "Call it finished",
+];
+
+/**
+ * One of them, chosen from the checkpoint's own words.
+ *
+ * Derived rather than random: it has to be the same on every render and the same again after
+ * a reload, or the button changes wording while you're reading it. Different checkpoints hash
+ * differently, which is all the variety this needs.
+ */
+function doneLabelFor(seed: string): string {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index++) {
+    hash = (hash * 31 + seed.charCodeAt(index)) | 0;
+  }
+  return DONE_LABELS[(hash >>> 0) % DONE_LABELS.length];
+}
 
 const IDEAS_SHOWN = 5;
 
@@ -497,6 +531,15 @@ export function Studio({
     if (editTimerRef.current) clearTimeout(editTimerRef.current);
   }, []);
 
+  /** Marks the checkpoint on one turn as settled, so its choices stop asking to be made. */
+  function markDone(index: number) {
+    setMessages((prev) =>
+      prev.map((message, at) =>
+        at === index && message.kind === "scaid" ? { ...message, done: true } : message,
+      ),
+    );
+  }
+
   const [exporting, setExporting] = useState(false);
   const [confirmingNew, setConfirmingNew] = useState(false);
 
@@ -736,6 +779,7 @@ export function Studio({
                   message={message}
                   active={index === messages.length - 1 && !working}
                   onPick={submitPrompt}
+                  onDone={() => markDone(index)}
                 />
               ))}
 
@@ -948,15 +992,80 @@ function Choices({
   );
 }
 
+/**
+ * The pause between versions: what to go and look at, and the honest ways forward.
+ *
+ * Lives inside the message so a decision stays attached to the version it was about, and
+ * collapses once it's been settled — a question that has already been answered shouldn't
+ * keep sitting there asking.
+ */
+function Checkpoint({
+  checkpoint,
+  active,
+  done,
+  onPick,
+  onDone,
+}: {
+  checkpoint: AgentCheckpoint;
+  active: boolean;
+  done: boolean;
+  onPick: (text: string) => void;
+  onDone: () => void;
+}) {
+  const doneLabel = doneLabelFor(checkpoint.look);
+
+  if (done) {
+    return (
+      <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-ink-700 bg-ink-850 p-4">
+        <CheckCircle size={18} weight="duotone" className="mt-0.5 shrink-0 text-emerald-400" />
+        <p className="text-sm leading-relaxed text-mist-300">
+          Nice one — it&apos;s ready. Save it to your library, or download it to print.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 rounded-xl border border-ink-700 bg-ink-850 p-4">
+      <div className="flex items-start gap-2.5">
+        <Eye size={18} weight="duotone" className="mt-0.5 shrink-0 text-volt-300" />
+        <p className="text-sm leading-relaxed text-mist-200">{normalizeText(checkpoint.look)}</p>
+      </div>
+
+      {checkpoint.directions.length > 0 && (
+        <>
+          <p className="mt-4 text-xs font-semibold tracking-widest text-mist-500 uppercase">
+            Where next
+          </p>
+          <Choices choices={checkpoint.directions} active={active} onPick={onPick} />
+        </>
+      )}
+
+      {/* The way out. Nothing is sent and nothing is built — saying you're finished is an
+          answer to the checkpoint, not another request. */}
+      <button
+        onClick={onDone}
+        disabled={!active}
+        className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-2.5 text-[15px] font-medium text-emerald-300 transition hover:border-emerald-500/50 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-45"
+      >
+        <CheckCircle size={17} weight="duotone" />
+        {doneLabel}
+      </button>
+    </div>
+  );
+}
+
 function MessageBlock({
   message,
   active,
   onPick,
+  onDone,
 }: {
   message: Message;
   /** Whether this is the newest turn, and so still the one being answered. */
   active: boolean;
   onPick: (text: string) => void;
+  onDone: () => void;
 }) {
   if (message.kind === "question") {
     return (
@@ -1034,25 +1143,13 @@ function MessageBlock({
       </ol>
 
       {design.checkpoint?.look && (
-        // The pause: what to go and look at, and the honest ways forward from here. Kept
-        // inside the message so the decision stays attached to the version it was about.
-        <div className="mt-6 rounded-xl border border-ink-700 bg-ink-850 p-4">
-          <div className="flex items-start gap-2.5">
-            <Eye size={18} weight="duotone" className="mt-0.5 shrink-0 text-volt-300" />
-            <p className="text-sm leading-relaxed text-mist-200">
-              {normalizeText(design.checkpoint.look)}
-            </p>
-          </div>
-
-          {design.checkpoint.directions.length > 0 && (
-            <>
-              <p className="mt-4 text-xs font-semibold tracking-widest text-mist-500 uppercase">
-                Where next
-              </p>
-              <Choices choices={design.checkpoint.directions} active={active} onPick={onPick} />
-            </>
-          )}
-        </div>
+        <Checkpoint
+          checkpoint={design.checkpoint}
+          active={active}
+          done={message.done ?? false}
+          onPick={onPick}
+          onDone={onDone}
+        />
       )}
     </div>
   );
