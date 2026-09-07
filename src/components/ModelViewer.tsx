@@ -9,6 +9,20 @@ const ORIENTATION = "0deg -90deg 0deg";
 const HOME_ORBIT = "-40deg 70deg 320mm";
 const HOME_TARGET = "0m 0.03m 0m";
 
+/**
+ * The key to hold for sliding the model around.
+ *
+ * model-viewer pans on Ctrl, Meta, Shift or a right-click drag, so both of these genuinely
+ * work everywhere — this only picks the one that reads as native. Safe to call during
+ * render: the viewer renders nothing but "Warming up…" until the custom element has loaded
+ * in the browser, so the server never produces markup this could disagree with.
+ */
+function panModifier(): string {
+  if (typeof navigator === "undefined") return "Ctrl";
+  // `platform` is deprecated but is still the most dependable Mac signal in every browser.
+  return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
+}
+
 export function ModelViewer({ src, spinning }: { src: string | null; spinning: boolean }) {
   const viewerRef = useRef<ModelViewerElement>(null);
   const [ready, setReady] = useState(false);
@@ -96,8 +110,8 @@ export function ModelViewer({ src, spinning }: { src: string | null; spinning: b
       )}
 
       {src && modelShown && (
-        <div className="pointer-events-none absolute bottom-5 left-5 text-xs font-medium text-mist-500">
-          Drag to spin · scroll to zoom
+        <div className="pointer-events-none absolute bottom-5 left-5 max-w-[calc(100%-10rem)] text-xs font-medium text-mist-500">
+          Drag to spin · scroll to zoom · {panModifier()} + drag to move
         </div>
       )}
 
