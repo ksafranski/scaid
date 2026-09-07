@@ -244,9 +244,18 @@ export function Studio({
     });
   }, [messages, design, savedId, lastPrompt, view, saveState]);
 
+  /**
+   * Creations already loaded from the URL, so each one opens exactly once.
+   *
+   * Start new drops the id from the address bar without navigating, which leaves this prop
+   * holding an id whose project is no longer open. Recording what has been consumed means a
+   * later re-run of this effect can't quietly fetch that project back over a blank one.
+   */
+  const openedRef = useRef<string | null>(null);
+
   // Opening something from the library drops it straight into the studio.
   useEffect(() => {
-    if (!openCreationId) return;
+    if (!openCreationId || openedRef.current === openCreationId) return;
     let cancelled = false;
 
     (async () => {
@@ -254,6 +263,11 @@ export function Studio({
       if (!response.ok || cancelled) return;
       const { creation }: { creation: Creation } = await response.json();
       if (cancelled) return;
+
+      // Marked here rather than up front: development mounts every effect twice, and the
+      // first pass is cancelled before it can load anything. Claiming the id early would
+      // make the second pass skip the work the first one never finished.
+      openedRef.current = openCreationId;
 
       setSavedId(creation.id);
       setLastPrompt(creation.prompt);
@@ -493,6 +507,15 @@ export function Studio({
 
   function startNew() {
     clearSession();
+    // The address bar still names the creation that was open, so a refresh would load it
+    // straight back over the blank project. Rewritten in place rather than navigated: a route
+    // change re-runs this page's server render, and its database read, to drop a parameter.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("id")) {
+      url.searchParams.delete("id");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+    }
+
     reset(); // the viewport must clear too, not just the conversation
     setMessages([]);
     setDesign(null);
