@@ -9,6 +9,7 @@ import {
   ImageSquare,
   CheckCircle,
   Eye,
+  PencilSimple,
   Plus,
   Question,
   Warning,
@@ -780,6 +781,7 @@ export function Studio({
                   active={index === messages.length - 1 && !working}
                   onPick={submitPrompt}
                   onDone={() => markDone(index)}
+                  onOther={() => promptRef.current?.focus()}
                 />
               ))}
 
@@ -1060,12 +1062,15 @@ function MessageBlock({
   active,
   onPick,
   onDone,
+  onOther,
 }: {
   message: Message;
   /** Whether this is the newest turn, and so still the one being answered. */
   active: boolean;
   onPick: (text: string) => void;
   onDone: () => void;
+  /** Hands the question back to the person, for an answer none of the options cover. */
+  onOther: () => void;
 }) {
   if (message.kind === "question") {
     return (
@@ -1075,9 +1080,18 @@ function MessageBlock({
           <p className="leading-relaxed text-mist-100">{normalizeText(message.question)}</p>
         </div>
         <Choices choices={message.options} active={active} onPick={onPick} />
-        {active && (
-          <p className="mt-3 text-xs text-mist-500">Or just tell me in your own words.</p>
-        )}
+
+        {/* The options are the common answers, not the whole set. This is the way to say
+            something they didn't think of — it puts the caret in the box rather than opening
+            a second one right above the composer. */}
+        <button
+          onClick={onOther}
+          disabled={!active}
+          className="mt-1.5 flex w-full items-center gap-2 rounded-xl border border-dashed border-ink-600 px-4 py-2.5 text-left text-[15px] text-mist-500 transition hover:border-volt-500/50 hover:text-mist-300 disabled:pointer-events-none disabled:opacity-45"
+        >
+          <PencilSimple size={16} weight="duotone" />
+          Other — I&apos;ll describe it
+        </button>
       </div>
     );
   }
