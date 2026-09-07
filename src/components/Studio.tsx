@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   CaretDown,
   CaretUp,
@@ -49,13 +49,61 @@ type Message =
 /** How many times a failed build is repaired without being asked. */
 const AUTO_REPAIR_LIMIT = 1;
 
+/**
+ * Starting points for someone with no idea in mind.
+ *
+ * Every one is a single recognizable object that a few basic solids can make, so the first
+ * build lands fast and looks like the thing it's named after. Nothing here needs lettering:
+ * OpenSCAD's text() depends on fonts the browser build doesn't ship, so a suggestion that
+ * leads there would fail for reasons the person can't do anything about.
+ */
 const IDEAS = [
+  "a chess pawn",
   "a phone stand angled for watching video",
+  "a plant pot with drainage holes",
   "a hex keychain with a hole for a ring",
   "a desk organizer with three slots",
-  "a chess pawn",
-  "a plant pot with drainage holes",
+  "a die with rounded corners",
+  "a coffee mug with a chunky handle",
+  "a pencil cup",
+  "a door wedge",
+  "a tealight holder",
+  "a soap dish with drainage slots",
+  "a spinning top",
+  "a guitar pick",
+  "a napkin ring",
+  "a coaster with a raised rim",
+  "a small funnel",
+  "a bookend",
+  "a cable clip for the edge of a desk",
+  "a domino",
+  "a drawer knob",
+  "a toothbrush holder",
+  "a stacking cup",
+  "a paperweight shaped like a mountain",
+  "a luggage tag",
+  "a tiny vase for one flower",
+  "a cookie cutter shaped like a star",
+  "a four-sided pyramid",
+  "a heart keychain",
+  "a ring stand",
+  "a bowl with a wavy rim",
 ];
+
+const IDEAS_SHOWN = 5;
+
+/** Nothing to subscribe to — the value only differs between the server and the browser. */
+const noStoreUpdates = () => () => {};
+
+/** A handful of ideas at random, so the list isn't the same five every visit. */
+function pickIdeas(): string[] {
+  const pool = [...IDEAS];
+  const picked: string[] = [];
+  while (picked.length < IDEAS_SHOWN && pool.length) {
+    picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  return picked;
+}
 
 
 export function Studio({
@@ -90,6 +138,7 @@ export function Studio({
   /** The conversation itself, measured so the view can follow it as it grows. */
   const conversationRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   /**
    * The code the agent last handed us, so a render failure can be traced back to it.
    *
@@ -392,7 +441,19 @@ export function Studio({
   const editTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function editCode(next: string) {
-    setDesign((prev) => (prev ? { ...prev, code: next } : prev));
+    // Writing into an empty editor starts a build from nothing, so there's a design to hold
+    // it. The agent overwrites all of this the moment it's asked to change anything.
+    setDesign((prev) =>
+      prev
+        ? { ...prev, code: next }
+        : {
+            name: "Hand-built model",
+            description: "Written by hand in the code editor.",
+            summary: "",
+            steps: [],
+            code: next,
+          },
+    );
     setSaveState("idle");
     if (editTimerRef.current) clearTimeout(editTimerRef.current);
 
@@ -413,6 +474,22 @@ export function Studio({
   const [confirmingNew, setConfirmingNew] = useState(false);
 
   const hasUnsavedWork = Boolean(design) && saveState !== "saved";
+
+  /**
+   * A genuinely blank studio, which opens centered rather than docked to the bottom.
+   *
+   * Code written by hand counts as a start, even with nothing said: the suggestions would
+   * read as ways to begin while actually asking for the existing model to be changed into
+   * one of them.
+   */
+  const atStart = messages.length === 0 && !design;
+
+  // A blank studio has exactly one thing to do, so put the caret there — on arrival and
+  // again on Start new. preventScroll because the composer sits mid-panel at this point and
+  // focusing it shouldn't shunt the centered layout around.
+  useEffect(() => {
+    if (atStart) promptRef.current?.focus({ preventScroll: true });
+  }, [atStart]);
 
   function startNew() {
     clearSession();
@@ -530,7 +607,7 @@ export function Studio({
           <ViewButton active={view === "chat"} onClick={() => setView("chat")} Glyph={ChatCircleDots}>
             Chat
           </ViewButton>
-          <ViewButton active={view === "code"} onClick={() => setView("code")} Glyph={Code} disabled={!design}>
+          <ViewButton active={view === "code"} onClick={() => setView("code")} Glyph={Code}>
             Code
           </ViewButton>
         </div>
@@ -594,10 +671,10 @@ export function Studio({
       >
         {/* Left panel: conversation, or the code you can edit */}
         <section className="relative flex min-h-0 flex-col border-ink-700 bg-ink-850 lg:border-r">
-          {view === "code" && design ? (
+          {view === "code" ? (
             <div className="flex min-h-0 flex-1 flex-col pt-3">
               <CodeEditor
-                code={design.code}
+                code={design?.code ?? ""}
                 onChange={editCode}
                 isRendering={isRendering}
                 error={renderError}
@@ -609,13 +686,14 @@ export function Studio({
           <div
             ref={scrollerRef}
             onScroll={trackScrollDirection}
-            className="min-h-0 flex-1 overflow-y-auto p-5"
+            // The vertical padding goes while the panel is empty: it belongs to the messages,
+            // and on an empty scroller it is 40px of height the counterweight can't match,
+            // which would leave the opening group sitting off-center by exactly that much.
+            className={`min-h-0 flex-1 overflow-y-auto px-5 ${atStart ? "py-0" : "py-5"}`}
           >
             {/* The conversation is wrapped so its height can be observed on its own — the
                 scroller's own box never changes when a message is added to it. */}
             <div ref={conversationRef} className="space-y-4">
-              {messages.length === 0 && <Opener onPick={submitPrompt} />}
-
               {messages.map((message, index) => (
                 <MessageBlock key={index} message={message} />
               ))}
@@ -624,12 +702,19 @@ export function Studio({
             </div>
           </div>
 
+          {atStart && <OpenerHeading />}
+
           <form
             onSubmit={(event) => {
               event.preventDefault();
               submitPrompt(prompt);
             }}
-            className="shrink-0 space-y-2.5 border-t border-ink-700 bg-ink-900 p-4"
+            // Docked to the bottom once there's a conversation. Before that it sits in the
+            // middle of the opening group, so the rule moves underneath it to divide the
+            // composer from the suggestions rather than marking the bottom of the panel.
+            className={`shrink-0 space-y-2.5 p-4 ${
+              atStart ? "border-b border-ink-700" : "border-t border-ink-700 bg-ink-900"
+            }`}
           >
             {attachment && (
               <div className="flex items-center gap-3 rounded-xl border border-ink-700 bg-ink-800 p-2 pr-3">
@@ -662,7 +747,8 @@ export function Studio({
                   submitPrompt(prompt);
                 }
               }}
-              rows={2}
+              ref={promptRef}
+              rows={3}
               placeholder={design ? "What should change?" : "What do you want to build?"}
               className="min-h-[3.25rem] w-full resize-none rounded-xl border border-ink-700 bg-ink-850 px-4 py-3 text-mist-100 transition placeholder:text-ink-500 focus:border-volt-500 focus:outline-none"
             />
@@ -696,6 +782,22 @@ export function Studio({
               </button>
             </div>
           </form>
+
+          {atStart && <OpenerIdeas onPick={submitPrompt} />}
+
+          {/*
+            The counterweight that centers the opening screen.
+
+            The empty scroller above and this below both take an equal share of the free
+            space, which leaves the title and the composer sitting in the middle with no
+            measuring involved. Sending the first prompt shrinks this back to nothing, and
+            the composer slides down into its docked position on the way.
+          */}
+          <div
+            aria-hidden
+            style={{ flexGrow: atStart ? 1 : 0 }}
+            className="shrink-0 basis-0 transition-[flex-grow] duration-500 ease-out motion-reduce:transition-none"
+          />
             </>
           )}
 
@@ -736,18 +838,35 @@ export function Studio({
   );
 }
 
-function Opener({ onPick }: { onPick: (text: string) => void }) {
+function OpenerHeading() {
   return (
-    <div className="animate-rise">
+    <div className="animate-rise shrink-0 px-5">
       <h1 className="font-display text-2xl font-bold">What do you want to build?</h1>
       <p className="mt-2 leading-relaxed text-mist-300">
         Describe it in your own words. You&apos;ll get a model you can spin around, plus a
         breakdown of how it was put together.
       </p>
+    </div>
+  );
+}
 
-      <p className="mt-7 text-xs font-semibold tracking-widest text-mist-500 uppercase">Try one</p>
+/** Suggestions, sitting under the composer as a fallback for when nothing comes to mind. */
+function OpenerIdeas({ onPick }: { onPick: (text: string) => void }) {
+  // The server and the browser would roll different numbers, so the server-rendered markup
+  // uses a fixed set and the shuffle happens once hydration has caught up. Same reason
+  // usePanelWidth reaches for this: it's the supported way to render the two differently.
+  const hydrated = useSyncExternalStore(
+    noStoreUpdates,
+    () => true,
+    () => false,
+  );
+  const ideas = useMemo(() => (hydrated ? pickIdeas() : IDEAS.slice(0, IDEAS_SHOWN)), [hydrated]);
+
+  return (
+    <div className="animate-rise min-h-0 overflow-y-auto px-5 pt-4 pb-2">
+      <p className="text-xs font-semibold tracking-widest text-mist-500 uppercase">Try one</p>
       <div className="mt-2.5 space-y-1.5">
-        {IDEAS.map((idea) => (
+        {ideas.map((idea) => (
           <button
             key={idea}
             onClick={() => onPick(idea)}

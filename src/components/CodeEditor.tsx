@@ -188,7 +188,11 @@ export function CodeEditor({
             autoCapitalize="off"
             aria-label="OpenSCAD source code"
             data-code-editor
-            className={`${typeStyle} absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent p-4 whitespace-pre text-transparent caret-volt-400 outline-none`}
+            // An empty editor is otherwise a blank panel with a blinking caret and no clue
+            // that it's yours to type in. The text itself is transparent so the highlighted
+            // layer shows through; placeholder color is set separately, so it still shows.
+            placeholder={"// Write OpenSCAD here and the model builds as you type.\n// $fn = 48;\n// cube([20, 20, 20]);"}
+            className={`${typeStyle} absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent p-4 whitespace-pre text-transparent caret-volt-400 outline-none placeholder:text-ink-500`}
           />
           </div>
         </div>
@@ -196,6 +200,7 @@ export function CodeEditor({
         {/* Status sits directly under the code, where the eyes already are. */}
         <div className="flex shrink-0 items-center justify-between gap-4 border-t border-ink-800 bg-ink-900 px-4 py-3">
           <Status
+            empty={!code.trim()}
             isRendering={isRendering}
             error={error}
             incomplete={incomplete}
@@ -216,18 +221,26 @@ export function CodeEditor({
  * is what tells you whether what you just typed actually worked.
  */
 function Status({
+  empty,
   isRendering,
   error,
   incomplete,
   errorLine,
   onJump,
 }: {
+  empty: boolean;
   isRendering: boolean;
   error: { friendly: string; detail: string } | null;
   incomplete: string | null;
   errorLine: number | null;
   onJump: () => void;
 }) {
+  // An empty editor has nothing to report, and the green "up to date" would be claiming a
+  // model that doesn't exist.
+  if (empty) {
+    return <span className="text-xs font-medium text-ink-500">Nothing to build yet</span>;
+  }
+
   // Unfinished code outranks the last error: that error came from text you have since
   // changed, so repeating it would be pointing at the wrong thing.
   if (incomplete) {
