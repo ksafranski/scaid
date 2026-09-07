@@ -6,7 +6,9 @@ import { requireUser } from "@/lib/auth";
 import { normalizeText } from "@/lib/emoji";
 import { ICON_NAMES } from "@/lib/iconNames";
 
-export const maxDuration = 120;
+// 300s is the platform maximum on Hobby and the default everywhere. Real requests land
+// at 30-50s; the headroom is for a complex model, not an expectation.
+export const maxDuration = 300;
 
 // One client for the lifetime of the server process, not one per request.
 const client = new Anthropic();
@@ -110,8 +112,15 @@ The picture is what they want to make. Look at its overall shape and build a sim
 of basic solids. Don't chase fine detail or texture; clean and chunky prints better and reads better.
 Say what you spotted and what you simplified, so they know you looked.`;
 
-/** ~5MB decoded is the API's per-image ceiling; base64 inflates by about a third. */
-const MAX_IMAGE_BASE64 = Math.ceil((5 * 1024 * 1024 * 4) / 3);
+/**
+ * Hard ceiling on the base64 image payload.
+ *
+ * Vercel caps a function's whole request body at 4.5MB and rejects anything larger with a
+ * 413 before this handler runs — so a limit sized to Anthropic's 5MB-per-image allowance
+ * would be unreachable. 3MB here leaves ~1.3MB for the prompt, the current code and the
+ * conversation history. The browser aims far below this; it's a backstop for direct callers.
+ */
+const MAX_IMAGE_BASE64 = 3 * 1024 * 1024;
 
 const RequestSchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
@@ -119,7 +128,7 @@ const RequestSchema = z.object({
   image: z
     .object({
       mediaType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
-      data: z.string().max(MAX_IMAGE_BASE64),
+      data: z.string().max(MAX_IMAGE_BASE64, "That picture is too large to send. Try a smaller one."),
     })
     .optional(),
   history: z
