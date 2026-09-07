@@ -1,0 +1,39 @@
+{
+  "name": "scaid",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "node scripts/dev-mongo.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:stop": "docker stop scaid-mongo",
+    "db:logs": "docker logs -f scaid-mongo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@google/model-viewer": "^4.3.1",
+    "@phosphor-icons/react": "^2.1.10",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.12",
+    "mongodb": "^7.6.0",
+    "nanoid": "^6.0.1",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
