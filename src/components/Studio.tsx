@@ -49,7 +49,7 @@ type Message =
   | { kind: "you"; text: string; imageUrl?: string }
   | { kind: "scaid"; design: Design; describeObject?: boolean; done?: boolean }
   /** A turn that asked instead of building, because the answer changes what the object is. */
-  | { kind: "question"; question: string; options: AgentChoice[] }
+  | { kind: "question"; question: string; options: AgentChoice[]; otherPicked?: boolean }
   /** Something the checks noticed and thought you'd want to know. Not an error. */
   | { kind: "note"; text: string }
   | { kind: "oops"; text: string };
@@ -532,6 +532,15 @@ export function Studio({
     if (editTimerRef.current) clearTimeout(editTimerRef.current);
   }, []);
 
+  /** Records that they're answering a question in their own words rather than picking one. */
+  function markOther(index: number, picked: boolean) {
+    setMessages((prev) =>
+      prev.map((message, at) =>
+        at === index && message.kind === "question" ? { ...message, otherPicked: picked } : message,
+      ),
+    );
+  }
+
   /** Marks the checkpoint on one turn as settled, so its choices stop asking to be made. */
   function markDone(index: number) {
     setMessages((prev) =>
@@ -545,6 +554,16 @@ export function Studio({
   const [confirmingNew, setConfirmingNew] = useState(false);
 
   const hasUnsavedWork = Boolean(design) && saveState !== "saved";
+
+  /**
+   * Waiting on an answer they said they'd write themselves.
+   *
+   * A focused caret is easy to miss on its own, so the composer says what it's waiting for as
+   * well — between them the choice registers somewhere you're already looking.
+   */
+  const lastMessage = messages[messages.length - 1];
+  const awaitingOther =
+    !working && lastMessage?.kind === "question" && lastMessage.otherPicked === true;
 
   /**
    * A genuinely blank studio, which opens centered rather than docked to the bottom.
@@ -779,9 +798,17 @@ export function Studio({
                   key={index}
                   message={message}
                   active={index === messages.length - 1 && !working}
-                  onPick={submitPrompt}
+                  onPick={(text) => {
+                    // Picking a listed answer un-picks Other, so the card can't end up
+                    // claiming they wrote their own answer when they didn't.
+                    markOther(index, false);
+                    submitPrompt(text);
+                  }}
                   onDone={() => markDone(index)}
-                  onOther={() => promptRef.current?.focus()}
+                  onOther={() => {
+                    markOther(index, true);
+                    promptRef.current?.focus();
+                  }}
                 />
               ))}
 
@@ -836,7 +863,13 @@ export function Studio({
               }}
               ref={promptRef}
               rows={3}
-              placeholder={design ? "What should change?" : "What do you want to build?"}
+              placeholder={
+                awaitingOther
+                  ? "Describe what you'd like instead…"
+                  : design
+                    ? "What should change?"
+                    : "What do you want to build?"
+              }
               className="min-h-[3.25rem] w-full resize-none rounded-xl border border-ink-700 bg-ink-850 px-4 py-3 text-mist-100 transition placeholder:text-ink-500 focus:border-volt-500 focus:outline-none"
             />
 
@@ -1087,10 +1120,18 @@ function MessageBlock({
         <button
           onClick={onOther}
           disabled={!active}
-          className="mt-1.5 flex w-full items-center gap-2 rounded-xl border border-dashed border-ink-600 px-4 py-2.5 text-left text-[15px] text-mist-500 transition hover:border-volt-500/50 hover:text-mist-300 disabled:pointer-events-none disabled:opacity-45"
+          aria-pressed={message.otherPicked ?? false}
+          className={`mt-1.5 flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-left text-[15px] transition disabled:pointer-events-none disabled:opacity-45 ${
+            message.otherPicked
+              ? "border-volt-500 bg-volt-500/10 text-mist-100"
+              : "border-dashed border-ink-600 text-mist-500 hover:border-volt-500/50 hover:text-mist-300"
+          }`}
         >
           <PencilSimple size={16} weight="duotone" />
           Other — I&apos;ll describe it
+          {message.otherPicked && (
+            <span className="ml-auto text-xs font-medium text-volt-300">Type below</span>
+          )}
         </button>
       </div>
     );
