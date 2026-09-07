@@ -107,3 +107,47 @@ textarea[data-code-editor]:focus-visible {
     animation: none;
   }
 }
+
+/*
+ * A highlight travelling across text that's mid-task.
+ *
+ * The gradient is painted through the glyphs themselves rather than behind them, so it reads
+ * as light moving over the words instead of a bar sliding under them. The band is narrow and
+ * most of the gradient sits at the resting color, which keeps the line legible the whole way
+ * through — this runs for the length of a build, so it has to be calm enough to read.
+ */
+@keyframes sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+.animate-sweep {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-mist-300) 0%,
+    var(--color-mist-300) 38%,
+    var(--color-mist-100) 48%,
+    var(--color-volt-300) 52%,
+    var(--color-mist-300) 62%,
+    var(--color-mist-300) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: sweep 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The gradient has to go with the animation, or the text keeps whatever color the sweep
+     happened to leave under it. */
+  .animate-sweep {
+    animation: none;
+    background-image: none;
+    color: var(--color-mist-300);
+  }
+}

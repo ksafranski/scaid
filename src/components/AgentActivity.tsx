@@ -62,7 +62,8 @@ export function AgentActivity({ activity }: { activity: Activity }) {
         ) : (
           <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
         )}
-        <span className="text-sm font-medium text-mist-300">{title}</span>
+        {/* The sweep says work is happening, so the resting color only applies when it isn't. */}
+        <span className="animate-sweep text-sm font-medium">{title}</span>
       </div>
 
       {activity.plan && (
@@ -84,7 +85,7 @@ export function AgentActivity({ activity }: { activity: Activity }) {
       )}
 
       {activity.notes.map((note, index) => (
-        <p key={index} className="text-sm leading-relaxed text-amber-300/90">
+        <p key={index} className="text-sm leading-relaxed text-mist-300">
           {note}
         </p>
       ))}

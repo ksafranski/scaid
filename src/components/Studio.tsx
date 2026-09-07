@@ -897,9 +897,12 @@ function MessageBlock({ message }: { message: Message }) {
 
   if (message.kind === "note") {
     return (
-      <div className="animate-rise flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+      // A problem that has already been dealt with is just part of the story, so it sits in
+      // the same box as everything else. The wrench carries the meaning; a colored panel
+      // would keep flagging it as something to worry about.
+      <div className="animate-rise flex items-start gap-2.5 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3">
         <Wrench size={17} weight="duotone" className="mt-0.5 shrink-0 text-amber-400" />
-        <p className="text-sm leading-relaxed text-amber-200/90">{message.text}</p>
+        <p className="text-sm leading-relaxed text-mist-300">{message.text}</p>
       </div>
     );
   }
