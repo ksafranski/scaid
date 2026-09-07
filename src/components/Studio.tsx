@@ -87,6 +87,8 @@ export function Studio({
 
   const restoredRef = useRef(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  /** The conversation itself, measured so the view can follow it as it grows. */
+  const conversationRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /**
    * The code the agent last handed us, so a render failure can be traced back to it.
@@ -96,9 +98,57 @@ export function Studio({
    */
   const repairRef = useRef<{ code: string; goal: string; attempts: number } | null>(null);
 
+  /** Whether the view should keep following the bottom of the conversation. */
+  const followingRef = useRef(true);
+
+  /**
+   * Follow the conversation as it grows.
+   *
+   * Growth is detected by measuring the conversation rather than by listing the state that
+   * ought to change its height. During a build the panel gets taller several times — the
+   * plan, each part, any notes — and text reflows for reasons React never sees: a line that
+   * wraps, the panel being dragged wider. Watching the element catches all of them, and
+   * there's no dependency list to keep in step with the UI.
+   *
+   * Whether to follow is decided by what *you* did, not by arithmetic on heights. The only
+   * way the position moves upward is if you moved it, because every scroll here goes down
+   * toward the bottom — so an upward move means you're reading something and following
+   * stops. Reaching the bottom again turns it back on, which is also why it can't get stuck:
+   * the scrolls it performs end at the bottom, so the "on" condition keeps re-arming itself.
+   */
   useEffect(() => {
-    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, working]);
+    const scroller = scrollerRef.current;
+    const conversation = conversationRef.current;
+    if (!scroller || !conversation) return;
+
+    const observer = new ResizeObserver(() => {
+      if (!followingRef.current) return;
+      // Deliberately not smooth. A build grows the panel every second or so, and chaining
+      // animations that never finish before the next one starts reads as lag. Smooth
+      // scrolling also stops dead in a background tab, which is exactly where a 40-second
+      // build tends to end up — you'd come back to a view stranded mid-conversation.
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+
+    observer.observe(conversation);
+    return () => observer.disconnect();
+    // The scroller unmounts when the panel switches to the code editor, so the observer has
+    // to be attached again on the way back.
+  }, [view]);
+
+  const lastScrollTopRef = useRef(0);
+
+  function trackScrollDirection() {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    // Moving up is always your doing; nothing here ever scrolls that way.
+    if (scroller.scrollTop < lastScrollTopRef.current - 2) followingRef.current = false;
+    lastScrollTopRef.current = scroller.scrollTop;
+
+    const fromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    if (fromBottom < 120) followingRef.current = true; // back at the bottom, so follow again
+  }
 
   const loadDesign = useCallback(
     (next: Design) => {
@@ -556,14 +606,22 @@ export function Studio({
             </div>
           ) : (
             <>
-          <div ref={scrollerRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-            {messages.length === 0 && <Opener onPick={submitPrompt} />}
+          <div
+            ref={scrollerRef}
+            onScroll={trackScrollDirection}
+            className="min-h-0 flex-1 overflow-y-auto p-5"
+          >
+            {/* The conversation is wrapped so its height can be observed on its own — the
+                scroller's own box never changes when a message is added to it. */}
+            <div ref={conversationRef} className="space-y-4">
+              {messages.length === 0 && <Opener onPick={submitPrompt} />}
 
-            {messages.map((message, index) => (
-              <MessageBlock key={index} message={message} />
-            ))}
+              {messages.map((message, index) => (
+                <MessageBlock key={index} message={message} />
+              ))}
 
-            {working && <AgentActivity activity={activity} />}
+              {working && <AgentActivity activity={activity} />}
+            </div>
           </div>
 
           <form
