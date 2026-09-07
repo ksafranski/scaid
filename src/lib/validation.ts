@@ -22,3 +22,16 @@ export function checkNickname(value: unknown): string | null {
   if (name.length > 30) return "That name is a little long — try 30 characters or fewer.";
   return null;
 }
+
+/**
+ * The beta signup gate.
+ *
+ * Checked server-side only, so the code never reaches the browser bundle. Overridable by
+ * env so it can be rotated in Vercel without a deploy.
+ */
+export function checkSignupCode(value: unknown): string | null {
+  const expected = (process.env.SIGNUP_CODE || "scaidtester").trim().toLowerCase();
+  if (typeof value !== "string" || !value.trim()) return "You'll need a beta code to sign up.";
+  if (value.trim().toLowerCase() !== expected) return "That beta code isn't right.";
+  return null;
+}

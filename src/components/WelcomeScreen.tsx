@@ -13,8 +13,9 @@ const EXAMPLES = [
 
 export function WelcomeScreen() {
   const router = useRouter();
-  const [mode, setMode] = useState<"signup" | "login">("signup");
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [nickname, setNickname] = useState("");
+  const [signupCode, setSignupCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export function WelcomeScreen() {
       const response = await fetch(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isSignup ? { nickname, email, password } : { email, password }),
+        body: JSON.stringify(isSignup ? { signupCode, nickname, email, password } : { email, password }),
       });
       const data = await response.json();
 
@@ -79,7 +80,7 @@ export function WelcomeScreen() {
       <section className="w-full max-w-sm">
         <div className="rounded-2xl border border-ink-700 bg-ink-850 p-7">
           <div className="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-ink-900 p-1">
-            {(["signup", "login"] as const).map((value) => (
+            {(["login", "signup"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -93,14 +94,23 @@ export function WelcomeScreen() {
                     : "text-mist-500 hover:text-mist-300"
                 }`}
               >
-                {value === "signup" ? "Create account" : "Sign in"}
+                {value === "login" ? "Sign in" : "Create account"}
               </button>
             ))}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {isSignup && (
-              <Field label="Name" value={nickname} onChange={setNickname} placeholder="Alex" autoComplete="nickname" />
+              <>
+                <Field
+                  label="Beta code"
+                  value={signupCode}
+                  onChange={setSignupCode}
+                  placeholder="Scaid is invite-only for now"
+                  autoComplete="off"
+                />
+                <Field label="Name" value={nickname} onChange={setNickname} placeholder="Alex" autoComplete="nickname" />
+              </>
             )}
             <Field
               label="Email"
@@ -130,7 +140,7 @@ export function WelcomeScreen() {
               disabled={busy}
               className="w-full rounded-xl bg-volt-500 px-6 py-3.5 font-semibold text-white transition hover:bg-volt-400 disabled:opacity-50"
             >
-              {busy ? "One moment…" : isSignup ? "Start building" : "Sign in"}
+              {busy ? "One moment…" : isSignup ? "Create account" : "Sign in"}
             </button>
           </form>
         </div>

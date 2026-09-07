@@ -31,6 +31,7 @@ Fill in `.env.local`:
 | `SESSION_SECRET` | Signs the login cookie. Generate with `openssl rand -base64 32`. |
 | `ANTHROPIC_API_KEY` | Powers the design agent. Get one from the [Anthropic Console](https://console.anthropic.com/settings/keys). |
 | `ANTHROPIC_MODEL` | Optional. Defaults to `claude-opus-5`. |
+| `SIGNUP_CODE` | Optional. Beta signup gate; defaults to `scaidtester`. |
 
 Then:
 

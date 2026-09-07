@@ -3,14 +3,16 @@ import bcrypt from "bcryptjs";
 import { MongoServerError } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import { createSession } from "@/lib/auth";
-import { checkEmail, checkNickname, checkPassword } from "@/lib/validation";
+import { checkEmail, checkNickname, checkPassword, checkSignupCode } from "@/lib/validation";
 import type { UserDoc } from "@/lib/types";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const { email, password, nickname } = body ?? {};
+  const { email, password, nickname, signupCode } = body ?? {};
 
-  const problem = checkEmail(email) ?? checkNickname(nickname) ?? checkPassword(password);
+  // Code first: no point telling someone their password is short if they can't sign up at all.
+  const problem =
+    checkSignupCode(signupCode) ?? checkEmail(email) ?? checkNickname(nickname) ?? checkPassword(password);
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
   const db = await getDb();
