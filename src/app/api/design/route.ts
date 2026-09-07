@@ -5,6 +5,9 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { normalizeText } from "@/lib/emoji";
 import { ICON_NAMES } from "@/lib/iconNames";
+import { encodeEvent, type AgentEvent } from "@/lib/agentEvents";
+import { StreamedFields } from "@/lib/partialJson";
+import { findAdvice, findProblems } from "@/lib/scadLint";
 
 // 300s is the platform maximum on Hobby and the default everywhere. Real requests land
 // at 30-50s; the headroom is for a complex model, not an expectation.
@@ -13,25 +16,29 @@ export const maxDuration = 300;
 // One client for the lifetime of the server process, not one per request.
 const client = new Anthropic();
 
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
+
+/**
+ * Field order is load-bearing.
+ *
+ * Structured output is generated in schema order, so this is also the order the browser
+ * learns things in. Putting the approach and the parts ahead of the code means the studio
+ * can report what's being built while it's still being built, from the model's own words
+ * rather than from a timer.
+ */
 const DesignSchema = z.object({
+  plan: z
+    .string()
+    .describe(
+      "One sentence, present tense, on how you're going to build this — the shapes you'll " +
+        "start from. Written BEFORE you work out the details, so keep it to the approach. " +
+        "e.g. 'Starting with a tapered tube for the body, then four swept fins around the base.'",
+    ),
   name: z
     .string()
     .describe(
       "A short name for the object itself, 2-4 words, no punctuation at the end. Names the thing, " +
         "not the change — keep it the same across tweaks unless it genuinely becomes something else.",
-    ),
-  description: z
-    .string()
-    .describe(
-      "One sentence on what the finished object IS, for someone seeing it fresh who knows nothing " +
-        "about this conversation. Never mentions changes, fixes, or earlier versions. Rewritten " +
-        "every turn to match how the object stands now. American English.",
-    ),
-  summary: z
-    .string()
-    .describe(
-      "Two or three sentences to the person on what you just did. First build: what you made. A " +
-        "change: what changed and why. Concrete, brief, a little fun. American English.",
     ),
   steps: z
     .array(
@@ -55,6 +62,19 @@ const DesignSchema = z.object({
     .min(1)
     .max(6)
     .describe("The build, broken into the handful of parts someone would actually notice."),
+  description: z
+    .string()
+    .describe(
+      "One sentence on what the finished object IS, for someone seeing it fresh who knows nothing " +
+        "about this conversation. Never mentions changes, fixes, or earlier versions. Rewritten " +
+        "every turn to match how the object stands now. American English.",
+    ),
+  summary: z
+    .string()
+    .describe(
+      "Two or three sentences to the person on what you just did. First build: what you made. A " +
+        "change: what changed and why. Concrete, brief, a little fun. American English.",
+    ),
   code: z.string().describe("The complete OpenSCAD program. Nothing else — no markdown fences."),
 });
 
@@ -64,8 +84,11 @@ You do two jobs, and both matter equally:
 1. Write correct OpenSCAD code that renders into the thing they asked for.
 2. Explain what you built and WHY, so they learn something and can take the next step themselves.
 
-## Three different pieces of writing
+## Four different pieces of writing
 These are not interchangeable, and mixing them up is the most common mistake here:
+- **plan** is the first thing you write and the person watches it appear while you work. Present
+  tense, one sentence, the approach only: which basic solids you're starting from. Not a summary of
+  finished work — you haven't done it yet.
 - **name** and **description** describe the OBJECT. They have to stand alone, because they're what
   someone sees in their library weeks later with no memory of this conversation. A mug is "a mug with
   a chunky handle" whether it's the first version or the ninth. Never write them as a report of what
@@ -101,6 +124,7 @@ These are not interchangeable, and mixing them up is the most common mistake her
 - Add a short comment above each part, in the same plain language as your steps, so the code reads
   like your explanation.
 - Prefer simple, readable code over clever code. Someone is going to read this and learn from it.
+- Write the code in the order your steps describe, so the two read together.
 
 ## When they ask for a change
 You get the code you wrote last time. Change only what they asked about and keep everything else
@@ -111,6 +135,38 @@ rewrite the description to fit the object as it now stands, still with no mentio
 The picture is what they want to make. Look at its overall shape and build a simplified 3D version out
 of basic solids. Don't chase fine detail or texture; clean and chunky prints better and reads better.
 Say what you spotted and what you simplified, so they know you looked.`;
+
+/**
+ * The repair pass.
+ *
+ * This runs with something the design pass never has: ground truth. Either OpenSCAD itself
+ * refused to compile the code, or a check found a certain failure. So the job here is
+ * narrow — fix the named fault and change nothing else.
+ */
+const RepairSchema = z.object({
+  note: z
+    .string()
+    .describe(
+      "One short sentence to the person on what was wrong and what you did about it, in plain " +
+        "language. No error codes, no OpenSCAD jargon. American English. e.g. 'Two walls were " +
+        "touching without overlapping, so I merged them properly.'",
+    ),
+  code: z.string().describe("The complete corrected OpenSCAD program. Nothing else — no fences."),
+});
+
+const REPAIR_SYSTEM = `You fix OpenSCAD code that failed to build. You are given the program, the exact
+failure, and what the model is supposed to be.
+
+Rules:
+- Fix the reported fault and NOTHING else. Every unrelated line comes back byte-identical. The person
+  is watching their model on screen and it must still be recognizably theirs.
+- Return the complete program, not a patch or a fragment.
+- Use ONLY built-in OpenSCAD features. No include<>, no use<> — no libraries are installed.
+- Keep it watertight and printable: overlap touching parts by 0.01mm, no zero-thickness walls.
+- Keep the existing comments and formatting.
+- If the failure is a syntax error, read the reported line number carefully — the real mistake is
+  often on the line above it.
+- The note is for a beginner. Say what was wrong in shape terms, not compiler terms.`;
 
 /**
  * Hard ceiling on the base64 image payload.
@@ -135,18 +191,86 @@ const RequestSchema = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(6000) }))
     .max(20)
     .optional(),
+  /** Present when the browser's renderer rejected code we just produced. */
+  repair: z
+    .object({
+      code: z.string().min(1).max(60000),
+      error: z.string().min(1).max(4000),
+      goal: z.string().max(600).optional(),
+    })
+    .optional(),
 });
 
 /** Prints per-request token usage so spend (and whether caching is hitting) is observable. */
-function logUsage(usage: Anthropic.Usage | undefined) {
+function logUsage(label: string, usage: Anthropic.Usage | undefined) {
   if (!usage) return;
   const cacheRead = usage.cache_read_input_tokens ?? 0;
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;
   console.log(
-    `[design] in=${usage.input_tokens} out=${usage.output_tokens} ` +
+    `[${label}] in=${usage.input_tokens} out=${usage.output_tokens} ` +
       `cache_read=${cacheRead} cache_write=${cacheWrite} ` +
       `(${cacheRead > 0 ? "cache HIT" : cacheWrite > 0 ? "cache written" : "no cache"})`,
   );
+}
+
+/** Models sometimes wrap code in markdown fences despite the schema description. */
+function stripFences(code: string): string {
+  return code.replace(/^\s*```(?:openscad|scad)?\n?/i, "").replace(/```\s*$/, "");
+}
+
+function friendlyApiError(error: unknown): string {
+  if (error instanceof Anthropic.RateLimitError) {
+    return "Lots of people are making things right now. Wait a few seconds and try again!";
+  }
+  if (error instanceof Anthropic.AuthenticationError) {
+    return "The ANTHROPIC_API_KEY isn't being accepted. Check it and restart.";
+  }
+  if (error instanceof Anthropic.APIError) {
+    return "I couldn't reach my thinking brain just now. Please try again in a moment.";
+  }
+  return "Something went wrong while I was building that. Please try again.";
+}
+
+/**
+ * Runs the repair model over a program with a known fault.
+ *
+ * `note` is first in the schema, so passing a `send` here means the person reads what was
+ * actually wrong while the corrected code is still being written, rather than watching a
+ * spinner for the whole pass.
+ */
+async function repairCode(args: { code: string; fault: string; goal?: string; send?: Send }) {
+  const stream = client.messages.stream({
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    system: [{ type: "text", text: REPAIR_SYSTEM, cache_control: { type: "ephemeral" } }],
+    messages: [
+      {
+        role: "user",
+        content:
+          `What this is supposed to be: ${args.goal || "the model in the code below"}\n\n` +
+          `What went wrong:\n${args.fault}\n\n` +
+          `The program:\n${args.code}`,
+      },
+    ],
+    output_config: { format: zodOutputFormat(RepairSchema) },
+  });
+
+  const send = args.send;
+  if (send) {
+    const fields = new StreamedFields();
+    stream.on("text", (_delta, snapshot) => {
+      const note = fields.note(snapshot);
+      if (note) send({ t: "note", text: normalizeText(note) });
+
+      const lines = fields.lines(snapshot);
+      if (lines !== null) send({ t: "lines", count: lines });
+    });
+  }
+
+  const response = await stream.finalMessage();
+  logUsage("repair", response.usage);
+  return response.parsed_output;
 }
 
 export async function POST(request: Request) {
@@ -167,7 +291,75 @@ export async function POST(request: Request) {
   if (!parsedBody.success) {
     return NextResponse.json({ error: "Tell me what you'd like to make!" }, { status: 400 });
   }
-  const { prompt, currentCode, history, image } = parsedBody.data;
+  const body = parsedBody.data;
+
+  // Once bytes are on the wire the status code is already 200, so from here on every failure
+  // travels as an `error` event instead. Anything that can be rejected outright is above.
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      let closed = false;
+
+      const send = (event: AgentEvent) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(encodeEvent(event)));
+      };
+
+      try {
+        const design = body.repair ? await runRepair(body, send) : await runDesign(body, send);
+        if (design) send({ t: "design", design });
+      } catch (error) {
+        console.error("[design] failed:", error);
+        send({ t: "error", error: friendlyApiError(error) });
+      } finally {
+        closed = true;
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      // no-transform keeps proxies from buffering the whole body to compress it, which would
+      // turn every progress event into one delivery at the very end.
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+type Send = (event: AgentEvent) => void;
+type Body = z.infer<typeof RequestSchema>;
+
+/** The repair path: the browser's renderer rejected code we just produced. */
+async function runRepair(body: Body, send: Send) {
+  const repair = body.repair!;
+  send({ t: "stage", stage: "fixing" });
+
+  const fixed = await repairCode({
+    code: repair.code,
+    fault: `OpenSCAD reported:\n${repair.error}`,
+    goal: repair.goal,
+    send,
+  });
+  if (!fixed) {
+    send({ t: "error", error: "I couldn't work out that error. Try describing the fix you want." });
+    return null;
+  }
+
+  return {
+    name: "",
+    description: "",
+    summary: normalizeText(fixed.note),
+    steps: [],
+    code: stripFences(fixed.code),
+  };
+}
+
+/** The main path: design something, then check what came out. */
+async function runDesign(body: Body, send: Send) {
+  const { prompt, currentCode, history, image } = body;
 
   const text = currentCode
     ? `Here is the code for what I have right now:\n\n${currentCode}\n\nPlease change it: ${prompt}`
@@ -186,74 +378,102 @@ export async function POST(request: Request) {
     { role: "user" as const, content },
   ];
 
-  try {
-    const response = await client.messages.parse({
-      model: process.env.ANTHROPIC_MODEL || "claude-opus-5",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      // The system prompt is byte-identical on every request from every user, so caching it
-      // means we pay full price for it roughly once per five minutes instead of every time.
-      // Placed explicitly rather than via top-level cache_control, which would land the
-      // breakpoint on the (always different) user turn and never hit.
-      system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
-      messages,
-      output_config: { format: zodOutputFormat(DesignSchema) },
-    });
+  send({ t: "stage", stage: "thinking" });
 
-    logUsage(response.usage);
+  const fields = new StreamedFields();
+  let json = "";
+  let stage: "thinking" | "parts" | "writing" = "thinking";
 
-    if (response.stop_reason === "refusal") {
-      return NextResponse.json(
-        { error: "I'd rather not make that one. Want to try a different idea?" },
-        { status: 422 },
-      );
+  const stream = client.messages.stream({
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    // The system prompt is byte-identical on every request from every user, so caching it
+    // means we pay full price for it roughly once per five minutes instead of every time.
+    // Placed explicitly rather than via top-level cache_control, which would land the
+    // breakpoint on the (always different) user turn and never hit.
+    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+    messages,
+    output_config: { format: zodOutputFormat(DesignSchema) },
+  });
+
+  // Structured output arrives as a text block holding JSON, generated in schema order, so
+  // these deltas are the model's real progress through the build — not a timer pretending.
+  stream.on("text", (_delta, snapshot) => {
+    json = snapshot;
+
+    const plan = fields.plan(json);
+    if (plan) {
+      stage = "parts";
+      send({ t: "stage", stage: "parts" });
+      send({ t: "plan", plan: normalizeText(plan) });
     }
 
-    const design = response.parsed_output;
-    if (!design) {
-      return NextResponse.json(
-        { error: "My answer came out muddled. Please ask me again!" },
-        { status: 502 },
-      );
+    const name = fields.name(json);
+    if (name) send({ t: "name", name: normalizeText(name) });
+
+    for (const part of fields.parts(json)) {
+      send({ t: "part", index: part.index, icon: part.icon, title: normalizeText(part.title) });
     }
 
-    // Models sometimes wrap code in markdown fences despite the schema description.
-    const code = design.code.replace(/^\s*```(?:openscad|scad)?\n?/i, "").replace(/```\s*$/, "");
+    const lines = fields.lines(json);
+    if (lines !== null) {
+      if (stage !== "writing") {
+        stage = "writing";
+        send({ t: "stage", stage: "writing" });
+      }
+      send({ t: "lines", count: lines });
+    }
+  });
 
-    // ...and sometimes emit "\ud83e\uddca" as literal text instead of the emoji it encodes.
-    return NextResponse.json({
-      design: {
-        name: normalizeText(design.name),
-        description: normalizeText(design.description),
-        summary: normalizeText(design.summary),
-        steps: design.steps.map((step) => ({
-          // icon is schema-validated, so only the prose can still carry stray escapes.
-          icon: step.icon,
-          title: normalizeText(step.title),
-          why: normalizeText(step.why),
-        })),
-        code,
-      },
-    });
-  } catch (error) {
-    if (error instanceof Anthropic.RateLimitError) {
-      return NextResponse.json(
-        { error: "Lots of people are making things right now. Wait a few seconds and try again!" },
-        { status: 429 },
-      );
-    }
-    if (error instanceof Anthropic.AuthenticationError) {
-      return NextResponse.json(
-        { error: "The ANTHROPIC_API_KEY in .env.local isn't being accepted. Check it and restart." },
-        { status: 503 },
-      );
-    }
-    if (error instanceof Anthropic.APIError) {
-      return NextResponse.json(
-        { error: "I couldn't reach my thinking brain just now. Please try again in a moment." },
-        { status: 502 },
-      );
-    }
-    throw error;
+  const response = await stream.finalMessage();
+  logUsage("design", response.usage);
+
+  if (response.stop_reason === "refusal") {
+    send({ t: "error", error: "I'd rather not make that one. Want to try a different idea?" });
+    return null;
   }
+
+  const parsed = response.parsed_output;
+  if (!parsed) {
+    send({ t: "error", error: "My answer came out muddled. Please ask me again!" });
+    return null;
+  }
+
+  let code = stripFences(parsed.code);
+
+  // The cheap review. Only certain failures get here, so a hit is always worth a second pass.
+  send({ t: "stage", stage: "checking" });
+  const problems = findProblems(code);
+
+  if (problems.length) {
+    console.log(`[design] pre-flight found ${problems.length} problem(s), repairing`);
+    send({ t: "stage", stage: "fixing" });
+    send({ t: "note", text: problems[0].friendly });
+
+    const fixed = await repairCode({
+      code,
+      fault: problems.map((problem) => problem.detail).join("\n"),
+      goal: parsed.description,
+      send,
+    });
+    // A failed repair isn't fatal — the browser will report the real error and offer a fix.
+    if (fixed) code = stripFences(fixed.code);
+  }
+
+  for (const note of findAdvice(code)) send({ t: "note", text: note });
+
+  // ...and models sometimes emit "🧊" as literal text instead of the emoji it encodes.
+  return {
+    name: normalizeText(parsed.name),
+    description: normalizeText(parsed.description),
+    summary: normalizeText(parsed.summary),
+    steps: parsed.steps.map((step) => ({
+      // icon is schema-validated, so only the prose can still carry stray escapes.
+      icon: step.icon,
+      title: normalizeText(step.title),
+      why: normalizeText(step.why),
+    })),
+    code,
+  };
 }

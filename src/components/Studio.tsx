@@ -9,6 +9,7 @@ import {
   ImageSquare,
   Plus,
   Warning,
+  Wrench,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -16,6 +17,8 @@ import { ModelViewer } from "./ModelViewer";
 import { TopBar } from "./TopBar";
 import { CodeEditor } from "./CodeEditor";
 import { StepIcon } from "./StepIcon";
+import { AgentActivity, IDLE_ACTIVITY, type Activity } from "./AgentActivity";
+import { readEvents, type AgentDesign } from "@/lib/agentEvents";
 import { useScadRenderer } from "@/hooks/useScadRenderer";
 import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
@@ -39,7 +42,12 @@ interface Design {
 type Message =
   | { kind: "you"; text: string; imageUrl?: string }
   | { kind: "scaid"; design: Design; describeObject?: boolean }
+  /** Something the checks noticed and thought you'd want to know. Not an error. */
+  | { kind: "note"; text: string }
   | { kind: "oops"; text: string };
+
+/** How many times a failed build is repaired without being asked. */
+const AUTO_REPAIR_LIMIT = 1;
 
 const IDEAS = [
   "a phone stand angled for watching video",
@@ -72,12 +80,20 @@ export function Studio({
   const [attachError, setAttachError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [workingLine, setWorkingLine] = useState(() => nextWorkingLine());
+  const [activity, setActivity] = useState<Activity>(IDLE_ACTIVITY);
   const [view, setView] = useState<"chat" | "code">("chat");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
   const restoredRef = useRef(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * The code the agent last handed us, so a render failure can be traced back to it.
+   *
+   * Auto-repair only fires for code that came from the agent and hasn't been touched since —
+   * an error while someone is editing their own code is theirs to fix, not ours to overwrite.
+   */
+  const repairRef = useRef<{ code: string; goal: string; attempts: number } | null>(null);
 
   // Cycle the waiting message so a slow design still feels alive.
   useEffect(() => {
@@ -162,6 +178,74 @@ export function Studio({
     };
   }, [openCreationId, loadDesign]);
 
+  /**
+   * Runs the agent and reports what it's doing as it does it.
+   *
+   * The response is a stream of events describing real work — the approach, each part as
+   * it's named, the code as it's written — so the panel above the composer shows the build
+   * happening rather than a spinner and a guess.
+   */
+  async function streamAgent(payload: Record<string, unknown>): Promise<AgentDesign | null> {
+    setActivity(IDLE_ACTIVITY);
+
+    const response = await fetch("/api/design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    // Anything rejected before the stream opens still comes back as a normal JSON error.
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => null);
+      setMessages((prev) => [...prev, { kind: "oops", text: data?.error ?? "Something went wrong." }]);
+      return null;
+    }
+
+    let design: AgentDesign | null = null;
+    const notes: string[] = [];
+
+    for await (const event of readEvents(response.body)) {
+      switch (event.t) {
+        case "stage":
+          setActivity((prev) => ({ ...prev, stage: event.stage }));
+          break;
+        case "plan":
+          setActivity((prev) => ({ ...prev, plan: event.plan }));
+          break;
+        case "name":
+          setActivity((prev) => ({ ...prev, name: event.name }));
+          break;
+        case "part":
+          setActivity((prev) => ({
+            ...prev,
+            parts: [...prev.parts, { icon: event.icon, title: event.title }],
+          }));
+          break;
+        case "lines":
+          setActivity((prev) => ({ ...prev, lines: event.count }));
+          break;
+        case "note":
+          notes.push(event.text);
+          setActivity((prev) => ({ ...prev, notes: [...prev.notes, event.text] }));
+          break;
+        case "design":
+          design = event.design;
+          break;
+        case "error":
+          setMessages((prev) => [...prev, { kind: "oops", text: event.error }]);
+          break;
+      }
+    }
+
+    // The activity panel disappears when the build lands, so anything the checks found has
+    // to move into the conversation to survive.
+    if (design && notes.length) {
+      setMessages((prev) => [...prev, ...notes.map((text) => ({ kind: "note" as const, text }))]);
+    }
+
+    return design;
+  }
+
   async function submitPrompt(text: string, image: PreparedImage | null = attachment) {
     // A picture on its own is a complete request; fill in the words they didn't need to type.
     const trimmed = text.trim() || (image ? "Build this from my picture." : "");
@@ -182,32 +266,83 @@ export function Studio({
     }
 
     try {
-      const response = await fetch("/api/design", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: trimmed,
-          currentCode: design?.code,
-          history,
-          image: image ? { mediaType: image.mediaType, data: image.data } : undefined,
-        }),
+      const built = await streamAgent({
+        prompt: trimmed,
+        currentCode: design?.code,
+        history,
+        image: image ? { mediaType: image.mediaType, data: image.data } : undefined,
       });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessages((prev) => [...prev, { kind: "oops", text: data.error ?? "Something went wrong." }]);
-        return;
-      }
+      if (!built) return;
 
       setLastPrompt(trimmed);
-      setMessages((prev) => [...prev, { kind: "scaid", design: data.design }]);
-      loadDesign(data.design);
+      setMessages((prev) => [...prev, { kind: "scaid", design: built }]);
+      // Arm the repair loop: if this code doesn't compile, it's ours to fix.
+      repairRef.current = { code: built.code, goal: built.description || trimmed, attempts: 0 };
+      loadDesign(built);
     } catch {
       setMessages((prev) => [...prev, { kind: "oops", text: "Couldn't reach the server. Is it still running?" }]);
     } finally {
       setWorking(false);
     }
   }
+
+  /**
+   * Sends failing code back with the compiler's own message.
+   *
+   * This is a different job from a design turn: the fault is known exactly, so the agent is
+   * asked to change that and nothing else rather than to reconsider the whole model.
+   */
+  const runRepair = useCallback(
+    async (detail: string) => {
+      const target = repairRef.current;
+      if (!target || working) return;
+
+      repairRef.current = null; // one attempt at a time
+      setWorking(true);
+      setWorkingLine(nextWorkingLine());
+
+      try {
+        const fixed = await streamAgent({
+          prompt: "Fix the build error.",
+          repair: { code: target.code, error: detail, goal: target.goal },
+        });
+        if (!fixed) return;
+
+        // A repair changes the code, not what the thing is — so the name, description and
+        // step-by-step from the original build all still stand.
+        setDesign((prev) => (prev ? { ...prev, code: fixed.code } : prev));
+        setSaveState("idle");
+        // What was wrong arrived as a note event while the fix was being written, so it's
+        // already in the conversation — adding `summary` here would say it twice.
+        repairRef.current = { ...target, code: fixed.code, attempts: target.attempts + 1 };
+        render(fixed.code);
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          { kind: "oops", text: "Couldn't reach the server to fix that. Is it still running?" },
+        ]);
+      } finally {
+        setWorking(false);
+      }
+    },
+    // streamAgent is redefined every render, but it only ever touches state through setters,
+    // so the captured copy can't go stale.
+    [working, render],
+  );
+
+  // Code the agent wrote that doesn't compile is a bug we shipped, so fix it without being
+  // asked — once. After that the manual button takes over, so a model that can't solve this
+  // particular error can't burn requests in a loop.
+  useEffect(() => {
+    if (!renderError || isRendering || working) return;
+
+    const target = repairRef.current;
+    if (!target || target.attempts >= AUTO_REPAIR_LIMIT) return;
+    // Someone has edited the code since; their error, their fix.
+    if (target.code !== design?.code) return;
+
+    runRepair(renderError.detail);
+  }, [renderError, isRendering, working, design?.code, runRepair]);
 
   // Typing shouldn't fire a render per keystroke; wait for a pause, then try to build.
   // The renderer keeps the last good model on screen when the code doesn't compile, so the
@@ -244,6 +379,8 @@ export function Studio({
     setSaveState("idle");
     setView("chat");
     setConfirmingNew(false);
+    setActivity(IDLE_ACTIVITY);
+    repairRef.current = null;
     restoredRef.current = true; // the cleared session is now the state worth persisting
   }
 
@@ -426,12 +563,7 @@ export function Studio({
               <MessageBlock key={index} message={message} />
             ))}
 
-            {working && (
-              <div className="animate-rise flex items-center gap-3 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3.5">
-                <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
-                <span className="text-sm font-medium text-mist-300">{workingLine}</span>
-              </div>
-            )}
+            {working && <AgentActivity activity={activity} flavor={workingLine} />}
           </div>
 
           <form
@@ -532,7 +664,12 @@ export function Studio({
           {renderError && view === "chat" && (
             <RenderProblem
               error={renderError}
-              onFix={() => submitPrompt("That didn't build. Please fix it.")}
+              onFix={() => {
+                // Hand the compiler's own message to the narrow repair pass when the failing
+                // code is the agent's; otherwise it's edited code, so ask for a fresh design.
+                if (repairRef.current?.code === design?.code) runRepair(renderError.detail);
+                else submitPrompt("That didn't build. Please fix it.");
+              }}
             />
           )}
         </section>
@@ -577,6 +714,15 @@ function MessageBlock({ message }: { message: Message }) {
           )}
           <p className="font-medium text-white">{message.text}</p>
         </div>
+      </div>
+    );
+  }
+
+  if (message.kind === "note") {
+    return (
+      <div className="animate-rise flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+        <Wrench size={17} weight="duotone" className="mt-0.5 shrink-0 text-amber-400" />
+        <p className="text-sm leading-relaxed text-amber-200/90">{message.text}</p>
       </div>
     );
   }
