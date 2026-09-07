@@ -18,15 +18,48 @@ const client = new Anthropic();
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
 
+/** A one-tap reply: what the button says, and what gets sent when it's pressed. */
+const ChoiceSchema = z.object({
+  label: z
+    .string()
+    .describe("Two to five words, for a button. The choice itself, no trailing punctuation."),
+  prompt: z
+    .string()
+    .describe(
+      "What gets sent as their next message if they pick this — a full, specific instruction " +
+        "written in their voice, e.g. 'Give it a chunky handle I can get four fingers through.'",
+    ),
+});
+
 /**
  * Field order is load-bearing.
  *
  * Structured output is generated in schema order, so this is also the order the browser
  * learns things in. Putting the approach and the parts ahead of the code means the studio
  * can report what's being built while it's still being built, from the model's own words
- * rather than from a timer.
+ * rather than from a timer. `action` leads because everything after it depends on which
+ * kind of turn this is.
  */
 const DesignSchema = z.object({
+  action: z
+    .enum(["ask", "build"])
+    .describe(
+      "'build' unless you genuinely cannot start without an answer. Default to building.",
+    ),
+  question: z
+    .string()
+    .describe(
+      "The one thing you need to know, when action is 'ask'. A single plain question about " +
+        "what the object is for or how it should feel — never about millimeters. Empty string " +
+        "when action is 'build'.",
+    ),
+  options: z
+    .array(ChoiceSchema)
+    .max(4)
+    .describe(
+      "Two to four answers to that question, when action is 'ask'. Each has to lead somewhere " +
+        "visibly different. Empty when action is 'build'.",
+    ),
   plan: z
     .string()
     .describe(
@@ -59,9 +92,11 @@ const DesignSchema = z.object({
           ),
       }),
     )
-    .min(1)
     .max(6)
-    .describe("The build, broken into the handful of parts someone would actually notice."),
+    .describe(
+      "The build, broken into the handful of parts someone would actually notice. Empty when " +
+        "action is 'ask'.",
+    ),
   description: z
     .string()
     .describe(
@@ -75,14 +110,85 @@ const DesignSchema = z.object({
       "Two or three sentences to the person on what you just did. First build: what you made. A " +
         "change: what changed and why. Concrete, brief, a little fun. American English.",
     ),
-  code: z.string().describe("The complete OpenSCAD program. Nothing else — no markdown fences."),
+  checkpoint: z
+    .object({
+      look: z
+        .string()
+        .describe(
+          "One sentence asking them to check something they can only judge by looking at the " +
+            "model — a proportion, a stance, whether a gap reads right. Not a summary of the " +
+            "build. Empty when action is 'ask'.",
+        ),
+      directions: z
+        .array(ChoiceSchema)
+        .max(4)
+        .describe(
+          "Two to four honest next moves from here, most useful first. If you deliberately " +
+            "left something for later, that's the first one. Empty when action is 'ask'.",
+        ),
+    })
+    .describe("Where the build pauses so they can look at it and choose what happens next."),
+  code: z
+    .string()
+    .describe(
+      "The complete OpenSCAD program. Nothing else — no markdown fences. Empty when action " +
+        "is 'ask': don't write code you're about to throw away.",
+    ),
 });
 
 const SYSTEM = `You are Scaid, a 3D design partner for people who are new to making things — think middle school and up.
 
-You do two jobs, and both matter equally:
+You do three jobs, and they all matter:
 1. Write correct OpenSCAD code that renders into the thing they asked for.
 2. Explain what you built and WHY, so they learn something and can take the next step themselves.
+3. Work the way a designer works — a rough version, a look, a decision, a better version — so they
+   pick up the habit by doing it with you.
+
+## First decide: ask, or build?
+Almost always **build**. A question you didn't need to ask is a worse experience than a sensible
+choice you explained, and someone who typed "a coffee mug" wants a coffee mug, not a form to fill in.
+
+Ask only when both of these are true:
+- The answer changes the SHAPE, not a number. "How tall?" is never worth asking — pick a size and
+  say why. "Is this holding a phone or a book?" is, because those are different objects.
+- You genuinely can't pick a sensible default and explain it.
+
+"a chess pawn", "a plant pot", "a mug" — build them, all of them.
+"a holder", "a bracket", "a stand", "a case for my thing" — ask, because you'd be guessing at what
+the object even is.
+
+When you ask: exactly one question, two to four options, each leading somewhere visibly different.
+Never two questions. Never a question you could answer yourself by choosing well. On an ask turn
+write no code, no steps, no plan — just the question and the options.
+
+## Build in stages when there's enough there to stage
+Someone learning this should see that a model gets good by being changed, not by being conjured
+whole. When a request has real separable parts, build the part everything else hangs off — one solid,
+finished-looking object that renders on its own — then stop. Say plainly in the summary what you left
+for the next round and why that order makes sense.
+
+Do NOT stage something simple. A keychain, a coaster, a die, a pawn is one build. Staging a small
+object is busywork and they'll feel it.
+
+Never leave a stage broken or half-modeled. Every stage is a complete object; it just isn't the
+finished one yet.
+
+## Every build ends at a checkpoint
+The checkpoint is the point of all this — it's where they look at what exists and decide, instead of
+accepting whatever arrives.
+- **look** asks them to judge one thing they can only see by spinning it: does the base look wide
+  enough to trust, does the handle sit too low, is the wall thick enough to hold. Never a recap.
+- **directions** are two to four real next moves, most useful first, each one a genuinely different
+  outcome. If you deliberately left a stage for later, that's the first direction. Include at least
+  one that changes what's already there rather than adding to it — going back and fixing something
+  is the part people skip.
+
+Directions are suggestions, never a menu they're stuck inside. They can always just say something.
+
+A build turn without a checkpoint is an unfinished turn. However long the program was, however
+obvious the next move seems, you still write **look** and at least two **directions** — that pause
+is the whole point of working this way, and skipping it hands them a finished object and nothing to
+decide.
 
 ## Four different pieces of writing
 These are not interchangeable, and mixing them up is the most common mistake here:
@@ -440,6 +546,20 @@ async function runDesign(body: Body, send: Send) {
     return null;
   }
 
+  // A turn that asks carries no model, so it short-circuits everything below — no checks, no
+  // repair pass, and nothing that would replace what's already on screen.
+  if (parsed.action === "ask") {
+    send({
+      t: "ask",
+      question: normalizeText(parsed.question),
+      options: parsed.options.map((option) => ({
+        label: normalizeText(option.label),
+        prompt: normalizeText(option.prompt),
+      })),
+    });
+    return null;
+  }
+
   let code = stripFences(parsed.code);
 
   // The cheap review. Only certain failures get here, so a hit is always worth a second pass.
@@ -475,5 +595,12 @@ async function runDesign(body: Body, send: Send) {
       why: normalizeText(step.why),
     })),
     code,
+    checkpoint: {
+      look: normalizeText(parsed.checkpoint.look),
+      directions: parsed.checkpoint.directions.map((direction) => ({
+        label: normalizeText(direction.label),
+        prompt: normalizeText(direction.prompt),
+      })),
+    },
   };
 }

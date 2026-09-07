@@ -7,7 +7,9 @@ import {
   ChatCircleDots,
   Code,
   ImageSquare,
+  Eye,
   Plus,
+  Question,
   Warning,
   Wrench,
   X,
@@ -18,7 +20,7 @@ import { TopBar } from "./TopBar";
 import { CodeEditor } from "./CodeEditor";
 import { StepIcon } from "./StepIcon";
 import { AgentActivity, IDLE_ACTIVITY, type Activity } from "./AgentActivity";
-import { readEvents, type AgentDesign } from "@/lib/agentEvents";
+import { readEvents, type AgentCheckpoint, type AgentChoice, type AgentDesign } from "@/lib/agentEvents";
 import { useScadRenderer } from "@/hooks/useScadRenderer";
 import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
@@ -37,11 +39,15 @@ interface Design {
   summary: string;
   steps: BuildStep[];
   code: string;
+  /** Where to pause and decide what happens next. Absent on anything saved before this. */
+  checkpoint?: AgentCheckpoint;
 }
 
 type Message =
   | { kind: "you"; text: string; imageUrl?: string }
   | { kind: "scaid"; design: Design; describeObject?: boolean }
+  /** A turn that asked instead of building, because the answer changes what the object is. */
+  | { kind: "question"; question: string; options: AgentChoice[] }
   /** Something the checks noticed and thought you'd want to know. Not an error. */
   | { kind: "note"; text: string }
   | { kind: "oops"; text: string };
@@ -334,6 +340,12 @@ export function Studio({
           notes.push(event.text);
           setActivity((prev) => ({ ...prev, notes: [...prev.notes, event.text] }));
           break;
+        case "ask":
+          setMessages((prev) => [
+            ...prev,
+            { kind: "question", question: event.question, options: event.options },
+          ]);
+          break;
         case "design":
           design = event.design;
           break;
@@ -368,6 +380,7 @@ export function Studio({
     for (const message of messages) {
       if (message.kind === "you") history.push({ role: "user", content: message.text });
       else if (message.kind === "scaid") history.push({ role: "assistant", content: message.design.summary });
+      else if (message.kind === "question") history.push({ role: "assistant", content: message.question });
     }
 
     try {
@@ -718,7 +731,12 @@ export function Studio({
                 scroller's own box never changes when a message is added to it. */}
             <div ref={conversationRef} className="space-y-4">
               {messages.map((message, index) => (
-                <MessageBlock key={index} message={message} />
+                <MessageBlock
+                  key={index}
+                  message={message}
+                  active={index === messages.length - 1 && !working}
+                  onPick={submitPrompt}
+                />
               ))}
 
               {working && <AgentActivity activity={activity} />}
@@ -903,7 +921,58 @@ function OpenerIdeas({ onPick }: { onPick: (text: string) => void }) {
   );
 }
 
-function MessageBlock({ message }: { message: Message }) {
+/** A row of one-tap replies. Disabled once the conversation has moved past them. */
+function Choices({
+  choices,
+  active,
+  onPick,
+}: {
+  choices: AgentChoice[];
+  active: boolean;
+  onPick: (text: string) => void;
+}) {
+  return (
+    <div className="mt-2.5 space-y-1.5">
+      {choices.map((choice) => (
+        <button
+          key={choice.label}
+          onClick={() => onPick(choice.prompt)}
+          disabled={!active}
+          title={choice.prompt}
+          className="block w-full rounded-xl border border-ink-700 bg-ink-850 px-4 py-2.5 text-left text-[15px] text-mist-300 transition hover:border-volt-500/50 hover:bg-ink-800 hover:text-mist-100 disabled:pointer-events-none disabled:opacity-45"
+        >
+          {choice.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MessageBlock({
+  message,
+  active,
+  onPick,
+}: {
+  message: Message;
+  /** Whether this is the newest turn, and so still the one being answered. */
+  active: boolean;
+  onPick: (text: string) => void;
+}) {
+  if (message.kind === "question") {
+    return (
+      <div className="animate-rise rounded-xl border border-ink-700 bg-ink-800 p-5">
+        <div className="flex items-start gap-2.5">
+          <Question size={19} weight="duotone" className="mt-0.5 shrink-0 text-volt-300" />
+          <p className="leading-relaxed text-mist-100">{normalizeText(message.question)}</p>
+        </div>
+        <Choices choices={message.options} active={active} onPick={onPick} />
+        {active && (
+          <p className="mt-3 text-xs text-mist-500">Or just tell me in your own words.</p>
+        )}
+      </div>
+    );
+  }
+
   if (message.kind === "you") {
     return (
       <div className="animate-rise flex justify-end">
@@ -963,6 +1032,28 @@ function MessageBlock({ message }: { message: Message }) {
           </li>
         ))}
       </ol>
+
+      {design.checkpoint?.look && (
+        // The pause: what to go and look at, and the honest ways forward from here. Kept
+        // inside the message so the decision stays attached to the version it was about.
+        <div className="mt-6 rounded-xl border border-ink-700 bg-ink-850 p-4">
+          <div className="flex items-start gap-2.5">
+            <Eye size={18} weight="duotone" className="mt-0.5 shrink-0 text-volt-300" />
+            <p className="text-sm leading-relaxed text-mist-200">
+              {normalizeText(design.checkpoint.look)}
+            </p>
+          </div>
+
+          {design.checkpoint.directions.length > 0 && (
+            <>
+              <p className="mt-4 text-xs font-semibold tracking-widest text-mist-500 uppercase">
+                Where next
+              </p>
+              <Choices choices={design.checkpoint.directions} active={active} onPick={onPick} />
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -25,12 +25,26 @@ export type AgentStage =
   /** Something was wrong and a second pass is fixing it. */
   | "fixing";
 
+/** A one-tap reply: the button's words, and the message sent when it's pressed. */
+export interface AgentChoice {
+  label: string;
+  prompt: string;
+}
+
+/** Where a build pauses for the person to look at it and choose what happens next. */
+export interface AgentCheckpoint {
+  /** One thing to judge by actually looking at the model. */
+  look: string;
+  directions: AgentChoice[];
+}
+
 export interface AgentDesign {
   name: string;
   description: string;
   summary: string;
   steps: BuildStep[];
   code: string;
+  checkpoint?: AgentCheckpoint;
 }
 
 export type AgentEvent =
@@ -44,6 +58,8 @@ export type AgentEvent =
   | { t: "lines"; count: number }
   /** Something worth saying that isn't a stage — a problem found and fixed. */
   | { t: "note"; text: string }
+  /** A turn that asks instead of building. Carries no model and no code. */
+  | { t: "ask"; question: string; options: AgentChoice[] }
   | { t: "design"; design: AgentDesign }
   | { t: "error"; error: string };
 
