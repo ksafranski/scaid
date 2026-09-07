@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle, Copy, Warning } from "@phosphor-icons/react";
+import { Check, CheckCircle, Copy, PencilSimple, Warning } from "@phosphor-icons/react";
 import { tokenizeScad, type TokenKind } from "@/lib/scadHighlight";
 import { errorLine as lineOf, firstProblem } from "@/lib/scadErrors";
 
@@ -39,12 +39,15 @@ export function CodeEditor({
   onChange,
   isRendering,
   error,
+  incomplete = null,
   readOnly = false,
 }: {
   code: string;
   onChange: (next: string) => void;
   isRendering: boolean;
   error: { friendly: string; detail: string } | null;
+  /** What half-typed code is still waiting for, e.g. "a closing }". */
+  incomplete?: string | null;
   readOnly?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -192,7 +195,13 @@ export function CodeEditor({
 
         {/* Status sits directly under the code, where the eyes already are. */}
         <div className="flex shrink-0 items-center justify-between gap-4 border-t border-ink-800 bg-ink-900 px-4 py-3">
-          <Status isRendering={isRendering} error={error} errorLine={errorLine} onJump={goToErrorLine} />
+          <Status
+            isRendering={isRendering}
+            error={error}
+            incomplete={incomplete}
+            errorLine={errorLine}
+            onJump={goToErrorLine}
+          />
           <span className="shrink-0 font-mono text-xs text-ink-500">
             {lineCount} {lineCount === 1 ? "line" : "lines"}
           </span>
@@ -209,14 +218,27 @@ export function CodeEditor({
 function Status({
   isRendering,
   error,
+  incomplete,
   errorLine,
   onJump,
 }: {
   isRendering: boolean;
   error: { friendly: string; detail: string } | null;
+  incomplete: string | null;
   errorLine: number | null;
   onJump: () => void;
 }) {
+  // Unfinished code outranks the last error: that error came from text you have since
+  // changed, so repeating it would be pointing at the wrong thing.
+  if (incomplete) {
+    return (
+      <span className="flex items-center gap-2 text-xs font-medium text-mist-500">
+        <PencilSimple size={14} weight="duotone" className="shrink-0" />
+        Waiting for {incomplete}
+      </span>
+    );
+  }
+
   if (isRendering) {
     return (
       <span className="flex items-center gap-2 text-xs font-medium text-mist-500">

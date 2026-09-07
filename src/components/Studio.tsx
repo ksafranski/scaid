@@ -26,8 +26,8 @@ import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
 import { DownloadMenu, PlateSizePicker, SizeReadout } from "./PrintControls";
 import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
 import { normalizeText } from "@/lib/emoji";
-import { nextWorkingLine } from "@/lib/workingLines";
 import { describeCreation, type BuildStep, type Creation } from "@/lib/types";
+import { incompleteReason } from "@/lib/scadSyntax";
 
 interface Design {
   name: string;
@@ -79,8 +79,9 @@ export function Studio({
   const [attachment, setAttachment] = useState<PreparedImage | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
-  const [workingLine, setWorkingLine] = useState(() => nextWorkingLine());
   const [activity, setActivity] = useState<Activity>(IDLE_ACTIVITY);
+  /** What the code being edited is still missing, or null when it's ready to compile. */
+  const [incomplete, setIncomplete] = useState<string | null>(null);
   const [view, setView] = useState<"chat" | "code">("chat");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
@@ -95,15 +96,6 @@ export function Studio({
    */
   const repairRef = useRef<{ code: string; goal: string; attempts: number } | null>(null);
 
-  // Cycle the waiting message so a slow design still feels alive.
-  useEffect(() => {
-    if (!working) return;
-    const timer = setInterval(() => {
-      setWorkingLine((current) => nextWorkingLine(current));
-    }, 2600);
-    return () => clearInterval(timer);
-  }, [working]);
-
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, working]);
@@ -112,6 +104,7 @@ export function Studio({
     (next: Design) => {
       setDesign(next);
       setSaveState("idle");
+      setIncomplete(null); // whatever was half-typed has just been replaced
       render(next.code);
     },
     [render],
@@ -256,7 +249,6 @@ export function Studio({
     setAttachment(null);
     setAttachError(null);
     setWorking(true);
-    setWorkingLine(nextWorkingLine());
 
     // Give the model the gist of the conversation, not every word of it.
     const history: Array<{ role: "user" | "assistant"; content: string }> = [];
@@ -299,7 +291,6 @@ export function Studio({
 
       repairRef.current = null; // one attempt at a time
       setWorking(true);
-      setWorkingLine(nextWorkingLine());
 
       try {
         const fixed = await streamAgent({
@@ -312,6 +303,7 @@ export function Studio({
         // step-by-step from the original build all still stand.
         setDesign((prev) => (prev ? { ...prev, code: fixed.code } : prev));
         setSaveState("idle");
+        setIncomplete(null);
         // What was wrong arrived as a note event while the fix was being written, so it's
         // already in the conversation — adding `summary` here would say it twice.
         repairRef.current = { ...target, code: fixed.code, attempts: target.attempts + 1 };
@@ -352,8 +344,14 @@ export function Studio({
   function editCode(next: string) {
     setDesign((prev) => (prev ? { ...prev, code: next } : prev));
     setSaveState("idle");
-
     if (editTimerRef.current) clearTimeout(editTimerRef.current);
+
+    // Half-typed code isn't a mistake, so it doesn't get compiled and it doesn't get an
+    // error. The last model stays put and the footer says what's still open.
+    const pending = incompleteReason(next);
+    setIncomplete(pending);
+    if (pending) return;
+
     editTimerRef.current = setTimeout(() => render(next), 500);
   }
 
@@ -380,6 +378,7 @@ export function Studio({
     setView("chat");
     setConfirmingNew(false);
     setActivity(IDLE_ACTIVITY);
+    setIncomplete(null);
     repairRef.current = null;
     restoredRef.current = true; // the cleared session is now the state worth persisting
   }
@@ -552,6 +551,7 @@ export function Studio({
                 onChange={editCode}
                 isRendering={isRendering}
                 error={renderError}
+                incomplete={incomplete}
               />
             </div>
           ) : (
@@ -563,7 +563,7 @@ export function Studio({
               <MessageBlock key={index} message={message} />
             ))}
 
-            {working && <AgentActivity activity={activity} flavor={workingLine} />}
+            {working && <AgentActivity activity={activity} />}
           </div>
 
           <form

@@ -26,13 +26,8 @@ export const IDLE_ACTIVITY: Activity = {
   notes: [],
 };
 
-/**
- * The headline for each phase.
- *
- * `thinking` is the exception and has no entry: before the first token there is genuinely
- * nothing to report, so that phase gets flavor text instead of a claim about progress.
- */
-function headline(activity: Activity): string | null {
+/** The headline for each phase. */
+function headline(activity: Activity): string {
   switch (activity.stage) {
     case "parts":
       return activity.parts.length ? "Working out the parts" : "Planning the build";
@@ -43,7 +38,9 @@ function headline(activity: Activity): string | null {
     case "fixing":
       return "Fixing a problem";
     default:
-      return null;
+      // Before the first token there is genuinely nothing to report, and saying so plainly
+      // beats inventing progress that hasn't happened.
+      return "Thinking…";
   }
 }
 
@@ -51,11 +48,10 @@ function headline(activity: Activity): string | null {
  * What Scaid is doing, while it does it.
  *
  * Every line here comes from the model's own output as it streams — the approach, then each
- * part as it's named, then the code as it's written. The only invented text is the flavor
- * line during `thinking`, which is the one stretch where nothing is known yet.
+ * part as it's named, then the code as it's written. Nothing is invented.
  */
-export function AgentActivity({ activity, flavor }: { activity: Activity; flavor: string }) {
-  const title = headline(activity) ?? flavor;
+export function AgentActivity({ activity }: { activity: Activity }) {
+  const title = headline(activity);
   const fixing = activity.stage === "fixing";
 
   return (
