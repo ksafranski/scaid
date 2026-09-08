@@ -40,6 +40,7 @@ import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
 import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
 import { DownloadMenu, PlateSizePicker, SizeReadout } from "./PrintControls";
 import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
+import { captureRegion, type LassoPoint } from "@/lib/regionCapture";
 import { normalizeText } from "@/lib/emoji";
 import { describeCreation, type BuildStep, type Creation } from "@/lib/types";
 import { incompleteReason } from "@/lib/scadSyntax";
@@ -458,7 +459,9 @@ export function Studio({
         currentCode: design?.code,
         requirements: design?.requirements,
         history,
-        image: image ? { mediaType: image.mediaType, data: image.data } : undefined,
+        image: image
+          ? { mediaType: image.mediaType, data: image.data, kind: image.kind }
+          : undefined,
       });
       if (!built) return;
 
@@ -705,6 +708,26 @@ export function Studio({
     }
   }
 
+  /**
+   * Turns a loop drawn on the model into the picture that goes with the next message.
+   *
+   * It uses the existing attachment slot, so it replaces a reference photo rather than
+   * joining one — a message carries a single picture, and these two mean opposite things.
+   */
+  async function attachRegion(
+    snapshot: string,
+    path: LassoPoint[],
+    width: number,
+    height: number,
+  ) {
+    const image = await captureRegion(snapshot, path, width, height);
+    if (!image) return;
+
+    setAttachment(image);
+    setAttachError(null);
+    promptRef.current?.focus({ preventScroll: true });
+  }
+
   async function attachFile(file: File | undefined) {
     if (!file) return;
     setAttachError(null);
@@ -910,7 +933,9 @@ export function Studio({
               <div className="flex items-center gap-3 rounded-xl border border-ink-700 bg-ink-800 p-2 pr-3">
                 {/* eslint-disable-next-line @next/next/no-img-element -- a client-side data: URL */}
                 <img src={attachment.previewUrl} alt="Attached reference" className="h-11 w-11 rounded-lg object-cover" />
-                <span className="flex-1 text-sm font-medium text-mist-300">Reference attached</span>
+                <span className="flex-1 text-sm font-medium text-mist-300">
+                  {attachment.kind === "region" ? "Region circled" : "Reference attached"}
+                </span>
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
@@ -1005,7 +1030,7 @@ export function Studio({
 
         {/* Preview */}
         <section className="relative flex min-h-0 flex-col bg-ink-900">
-          <ModelViewer src={modelUrl} spinning={isRendering} />
+          <ModelViewer src={modelUrl} spinning={isRendering} onRegion={attachRegion} />
 
           {isRendering && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

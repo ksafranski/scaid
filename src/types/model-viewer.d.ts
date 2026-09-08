@@ -13,6 +13,8 @@ export interface ModelViewerElement extends HTMLElement {
   cameraTarget: string;
   fieldOfView: string;
   jumpCameraToGoal(): void;
+  /** Snapshot of the rendered canvas — how a circled region gets its picture. */
+  toDataURL(type?: string, encoderOptions?: number): string;
 }
 
 export interface ModelViewerProps extends React.HTMLAttributes<HTMLElement> {

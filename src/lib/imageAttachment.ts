@@ -41,6 +41,13 @@ export interface PreparedImage {
   mediaType: "image/jpeg";
   /** data: URL for showing the thumbnail in the composer. */
   previewUrl: string;
+  /**
+   * What the picture is *for*, which changes how the agent should read it.
+   *
+   * A reference photo is the thing to build. A region capture is the model it already
+   * made, with part of it circled — building that would be nonsense.
+   */
+  kind: "reference" | "region";
 }
 
 export type PrepareResult = { ok: true; image: PreparedImage } | { ok: false; error: string };
@@ -109,6 +116,11 @@ export async function prepareImage(file: File): Promise<PrepareResult> {
 
   return {
     ok: true,
-    image: { data: previewUrl.slice(previewUrl.indexOf(",") + 1), mediaType: "image/jpeg", previewUrl },
+    image: {
+      data: previewUrl.slice(previewUrl.indexOf(",") + 1),
+      mediaType: "image/jpeg",
+      previewUrl,
+      kind: "reference",
+    },
   };
 }

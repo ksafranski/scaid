@@ -299,6 +299,14 @@ You get the code you wrote last time. Change only what they asked about and keep
 exactly as it was, so their build stays recognizable. Put what you changed in the summary — and
 rewrite the description to fit the object as it now stands, still with no mention of the change.
 
+## When they circle part of the model
+Sometimes the picture is the model you already built, with one part ringed in pink. That is not
+something to build — it's them pointing. Work out which piece of your own code sits under that ring
+and change only that. Name the part you settled on in your summary ("the handle", "the rim near the
+spout") so a wrong guess is obvious immediately and costs one message instead of a whole round.
+
+If the loop genuinely covers several parts, say so and change the one the words point at.
+
 ## When they attach a picture
 The picture is what they want to make. Look at its overall shape and build a simplified 3D version out
 of basic solids. Don't chase fine detail or texture; clean and chunky prints better and reads better.
@@ -353,6 +361,8 @@ const RequestSchema = z.object({
     .object({
       mediaType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
       data: z.string().max(MAX_IMAGE_BASE64, "That picture is too large to send. Try a smaller one."),
+      /** A photo of what to make, or the current model with a part circled on it. */
+      kind: z.enum(["reference", "region"]).default("reference"),
     })
     .optional(),
   history: z
@@ -605,6 +615,18 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
       .map((requirement) => `- [${requirement.done ? "x" : " "}] ${requirement.text}`)
       .join("\n");
     text += `\n\nThe checklist for this build so far:\n${checklist}\n\nCarry every one of these forward, with its status updated for the model as it stands after this change.`;
+  }
+
+  // A circled screenshot and a reference photo are opposite instructions — one is the thing
+  // to make, the other is the thing already made. Left unsaid, a region capture reads as
+  // "build me this picture of a lamp with a pink ring on it".
+  if (image?.kind === "region") {
+    text +=
+      "\n\nThe picture is the model as it looks right now, with one part circled in pink. " +
+      "That circled part is what this message is about — everything outside the loop is only " +
+      "there so you can see where it sits. Work out which piece of the code it corresponds to " +
+      "and change that, leaving the rest alone. Say which part you took it to mean, so I can " +
+      "tell you if you picked the wrong one.";
   }
 
   // Images go before the text — Claude follows the instruction better in that order.

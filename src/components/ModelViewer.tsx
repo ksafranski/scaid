@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowCounterClockwise, CircleNotch, Cube } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CircleNotch, Cube, Lasso, X } from "@phosphor-icons/react";
+import type { LassoPoint } from "@/lib/regionCapture";
 import type { ModelViewerElement } from "@/types/model-viewer";
 
 // The model sits Z-up like OpenSCAD; model-viewer is Y-up, so tip it a quarter turn.
@@ -23,8 +24,20 @@ function panModifier(): string {
   return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
 }
 
-export function ModelViewer({ src, spinning }: { src: string | null; spinning: boolean }) {
+export function ModelViewer({
+  src,
+  spinning,
+  onRegion,
+}: {
+  src: string | null;
+  spinning: boolean;
+  /** Called with the loop that was drawn, plus a snapshot of what it was drawn over. */
+  onRegion?: (snapshot: string, path: LassoPoint[], width: number, height: number) => void;
+}) {
   const viewerRef = useRef<ModelViewerElement>(null);
+  const [lassoing, setLassoing] = useState(false);
+  const [path, setPath] = useState<LassoPoint[]>([]);
+  const drawingRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
 
@@ -60,6 +73,28 @@ export function ModelViewer({ src, spinning }: { src: string | null; spinning: b
     viewer.addEventListener("load", onLoad);
     return () => viewer.removeEventListener("load", onLoad);
   }, [src, ready]);
+
+  /**
+   * The loop is drawn on an overlay rather than on the viewer itself.
+   *
+   * That's also what keeps the camera still while you draw: the overlay takes the pointer
+   * events, so model-viewer never sees a drag and never orbits out from under the line.
+   */
+  function pointIn(event: React.PointerEvent<HTMLDivElement>): LassoPoint {
+    const box = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - box.left, y: event.clientY - box.top };
+  }
+
+  function finishLasso(box: DOMRect) {
+    const viewer = viewerRef.current;
+    // Three points is the least that encloses anything; below that it was a stray click.
+    if (viewer && path.length >= 3 && onRegion) {
+      onRegion(viewer.toDataURL("image/jpeg", 0.92), path, box.width, box.height);
+    }
+    setPath([]);
+    setLassoing(false);
+    drawingRef.current = false;
+  }
 
   const resetView = useCallback(() => {
     const viewer = viewerRef.current;
@@ -103,6 +138,74 @@ export function ModelViewer({ src, spinning }: { src: string | null; spinning: b
           visibility: src ? "visible" : "hidden",
         }}
       />
+
+      {src && modelShown && lassoing && (
+        <div
+          onPointerDown={(event) => {
+            // Keeps the line following the cursor if it leaves the viewer mid-loop. Throws
+            // if the pointer is already gone, which is not a reason to lose the stroke.
+            try {
+              event.currentTarget.setPointerCapture(event.pointerId);
+            } catch {
+              // drawing still works, it just won't track outside the box
+            }
+            drawingRef.current = true;
+            setPath([pointIn(event)]);
+          }}
+          onPointerMove={(event) => {
+            if (!drawingRef.current) return;
+            const next = pointIn(event);
+            // Thin the trail out: a point per pixel is noise in the polygon and in the line.
+            setPath((prev) => {
+              const last = prev[prev.length - 1];
+              if (last && Math.hypot(next.x - last.x, next.y - last.y) < 4) return prev;
+              return [...prev, next];
+            });
+          }}
+          onPointerUp={(event) => finishLasso(event.currentTarget.getBoundingClientRect())}
+          onPointerCancel={() => {
+            setPath([]);
+            drawingRef.current = false;
+          }}
+          className="absolute inset-0 z-20 cursor-crosshair"
+        >
+          <svg className="pointer-events-none h-full w-full" aria-hidden>
+            {path.length > 1 && (
+              <polyline
+                points={path.map((point) => `${point.x},${point.y}`).join(" ")}
+                fill="rgba(255, 45, 120, 0.12)"
+                stroke="#ff2d78"
+                strokeWidth={2.5}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            )}
+          </svg>
+
+          {path.length === 0 && (
+            <p className="pointer-events-none absolute inset-x-0 top-5 text-center text-xs font-medium text-mist-300">
+              Draw a loop around the part you want to talk about
+            </p>
+          )}
+        </div>
+      )}
+
+      {src && modelShown && onRegion && (
+        <button
+          onClick={() => {
+            setPath([]);
+            setLassoing((on) => !on);
+          }}
+          className={`absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold backdrop-blur transition ${
+            lassoing
+              ? "border-[#ff2d78] bg-[#ff2d78]/15 text-mist-100"
+              : "border-ink-700 bg-ink-850/90 text-mist-300 hover:border-ink-600 hover:text-mist-100"
+          }`}
+        >
+          {lassoing ? <X size={14} weight="bold" /> : <Lasso size={14} weight="bold" />}
+          {lassoing ? "Cancel" : "Circle a part"}
+        </button>
+      )}
 
       {src && modelShown && (
         <button
