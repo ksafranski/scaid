@@ -38,12 +38,20 @@ export interface AgentCheckpoint {
   directions: AgentChoice[];
 }
 
+/** One thing they asked for, and whether the model as it stands actually does it. */
+export interface AgentRequirement {
+  text: string;
+  done: boolean;
+}
+
 export interface AgentDesign {
   name: string;
   description: string;
   summary: string;
   steps: BuildStep[];
   code: string;
+  /** Only for a request that carried several distinct requirements. */
+  requirements?: AgentRequirement[];
   checkpoint?: AgentCheckpoint;
 }
 

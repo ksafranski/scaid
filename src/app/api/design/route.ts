@@ -67,6 +67,25 @@ const DesignSchema = z.object({
         "start from. Written BEFORE you work out the details, so keep it to the approach. " +
         "e.g. 'Starting with a tapered tube for the body, then four swept fins around the base.'",
     ),
+  requirements: z
+    .array(
+      z.object({
+        text: z
+          .string()
+          .describe("One thing they asked for, in their words, as short as you can make it."),
+        done: z
+          .boolean()
+          .describe("Whether the model AS IT NOW STANDS satisfies this. Not whether you intend to."),
+      }),
+    )
+    .max(12)
+    .describe(
+      "Everything they asked for, listed before you write a line of code, so nothing gets " +
+        "quietly dropped. Start one only when a request carries several distinct requirements " +
+        "— a checklist of one is noise. But once a checklist exists you are given it back every " +
+        "turn, and every line of it comes back with the status updated, however small this " +
+        "turn's change was. The list belongs to the object, not to the message that began it.",
+    ),
   name: z
     .string()
     .describe(
@@ -175,6 +194,28 @@ Make the options concrete enough to picture: "Straight down through the thick en
 Say where and how, not which axis. And never write an option that means "something else" — the studio
 adds that itself.
 
+## When they hand you a lot at once
+A long request with a lot of specifics is the easiest kind to get wrong. Writing one big program
+against a wall of detail is how requirements get half-done or silently skipped.
+
+So enumerate before you build. Every distinct thing they asked for goes in **requirements**, one
+short line each, in their words — and you write that list before you write any code, so you're
+building against something explicit rather than against a memory of the paragraph.
+
+Then be honest in the checkboxes. "Done" means the model as it stands right now satisfies that
+line. Not that you meant to, not that it's nearly there. A requirement marked done that isn't is
+worse than no list at all, because they'll stop checking.
+
+Once a checklist exists it is handed back to you on every later turn. Re-list all of it, every
+time, with each line's status updated — even when this turn's message was one small change and the
+list is mostly untouched. Dropping it silently is how a promise gets forgotten, and they are
+watching that list to know what's left.
+
+Four or more requirements is too many for one pass. Satisfy the ones that establish the shape, mark
+the rest not done, and say in the summary which you're leaving and why that order makes sense. Every
+turn after that re-lists all of them with the statuses updated, so the list fills in as you go and
+they can see exactly what's left.
+
 ## Build in stages when there's enough there to stage
 Someone learning this should see that a model gets good by being changed, not by being conjured
 whole. When a request has real separable parts, build the part everything else hangs off — one solid,
@@ -192,6 +233,7 @@ The checkpoint is the point of all this — it's where they look at what exists 
 accepting whatever arrives.
 - **look** asks them to judge one thing they can only see by spinning it: does the base look wide
   enough to trust, does the handle sit too low, is the wall thick enough to hold. Never a recap.
+- When requirements are still unticked, the first direction is the most important one of them.
 - **directions** are exactly three real next moves, most useful first, each one a genuinely different
   outcome. If you deliberately left a stage for later, that's the first direction. Include at least
   one that changes what's already there rather than adding to it — going back and fixing something
@@ -316,6 +358,11 @@ const RequestSchema = z.object({
   history: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(6000) }))
     .max(20)
+    .optional(),
+  /** The checklist as it stands, so a later turn can carry it forward instead of guessing. */
+  requirements: z
+    .array(z.object({ text: z.string().max(300), done: z.boolean() }))
+    .max(12)
     .optional(),
   /** Present when the browser's renderer rejected code we just produced. */
   repair: z
@@ -487,9 +534,18 @@ async function runRepair(body: Body, send: Send) {
 async function runDesign(body: Body, send: Send) {
   const { prompt, currentCode, history, image } = body;
 
-  const text = currentCode
+  let text = currentCode
     ? `Here is the code for what I have right now:\n\n${currentCode}\n\nPlease change it: ${prompt}`
     : prompt;
+
+  // Handed back verbatim so the list belongs to the object rather than to whichever message
+  // happened to start it — the model has no other way to know what it already promised.
+  if (body.requirements?.length) {
+    const checklist = body.requirements
+      .map((requirement) => `- [${requirement.done ? "x" : " "}] ${requirement.text}`)
+      .join("\n");
+    text += `\n\nThe checklist for this build so far:\n${checklist}\n\nCarry every one of these forward, with its status updated for the model as it stands after this change.`;
+  }
 
   // Images go before the text — Claude follows the instruction better in that order.
   const content: Anthropic.ContentBlockParam[] = image
@@ -615,6 +671,10 @@ async function runDesign(body: Body, send: Send) {
       why: normalizeText(step.why),
     })),
     code,
+    requirements: parsed.requirements.map((requirement) => ({
+      text: normalizeText(requirement.text),
+      done: requirement.done,
+    })),
     checkpoint: {
       look: normalizeText(parsed.checkpoint.look),
       directions: parsed.checkpoint.directions.map((direction) => ({

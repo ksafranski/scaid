@@ -8,6 +8,7 @@ import {
   Check,
   CircleNotch,
   CheckCircle,
+  Circle,
   Code,
   Eye,
   FloppyDisk,
@@ -25,7 +26,13 @@ import { TopBar } from "./TopBar";
 import { CodeEditor } from "./CodeEditor";
 import { StepIcon } from "./StepIcon";
 import { AgentActivity, IDLE_ACTIVITY, type Activity } from "./AgentActivity";
-import { readEvents, type AgentCheckpoint, type AgentChoice, type AgentDesign } from "@/lib/agentEvents";
+import {
+  readEvents,
+  type AgentCheckpoint,
+  type AgentChoice,
+  type AgentDesign,
+  type AgentRequirement,
+} from "@/lib/agentEvents";
 import { useScadRenderer } from "@/hooks/useScadRenderer";
 import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
@@ -44,6 +51,8 @@ interface Design {
   summary: string;
   steps: BuildStep[];
   code: string;
+  /** What they asked for, ticked off. Only for a request that carried several things. */
+  requirements?: AgentRequirement[];
   /** Where to pause and decide what happens next. Absent on anything saved before this. */
   checkpoint?: AgentCheckpoint;
 }
@@ -425,6 +434,7 @@ export function Studio({
       const built = await streamAgent({
         prompt: trimmed,
         currentCode: design?.code,
+        requirements: design?.requirements,
         history,
         image: image ? { mediaType: image.mediaType, data: image.data } : undefined,
       });
@@ -1056,6 +1066,40 @@ function Choices({
 }
 
 /**
+ * What they asked for, ticked off.
+ *
+ * A long request is where things get quietly dropped, so the list is shown rather than
+ * trusted: anything still open is visible instead of being something they'd have to notice
+ * was missing. Emphasis runs the other way from a normal checklist — what's left is the
+ * brighter text, because that's the part that still needs a decision.
+ */
+function Requirements({ requirements }: { requirements: AgentRequirement[] }) {
+  const done = requirements.filter((requirement) => requirement.done).length;
+
+  return (
+    <div className="mt-5 rounded-xl border border-ink-700 bg-ink-850 p-4">
+      <p className="text-xs font-semibold tracking-widest text-mist-500 uppercase">
+        What you asked for · {done} of {requirements.length}
+      </p>
+      <ul className="mt-2.5 space-y-1.5">
+        {requirements.map((requirement, index) => (
+          <li key={index} className="flex items-start gap-2.5 text-sm leading-relaxed">
+            {requirement.done ? (
+              <CheckCircle size={17} weight="duotone" className="mt-0.5 shrink-0 text-emerald-400" />
+            ) : (
+              <Circle size={17} weight="duotone" className="mt-0.5 shrink-0 text-mist-500" />
+            )}
+            <span className={requirement.done ? "text-mist-300" : "text-mist-100"}>
+              {normalizeText(requirement.text)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * The pause between versions: what to go and look at, and the honest ways forward.
  *
  * Lives inside the message so a decision stays attached to the version it was about, and
@@ -1209,6 +1253,10 @@ function MessageBlock({
     <div className="animate-rise rounded-xl border border-ink-700 bg-ink-800 p-5">
       <h2 className="font-display text-xl font-bold">{normalizeText(design.name)}</h2>
       <p className="mt-2 leading-relaxed text-mist-300">{normalizeText(body)}</p>
+
+      {design.requirements && design.requirements.length > 0 && (
+        <Requirements requirements={design.requirements} />
+      )}
 
       <p className="mt-6 text-xs font-semibold tracking-widest text-mist-500 uppercase">How it&apos;s built</p>
       <ol className="mt-3 space-y-3.5">
