@@ -15,6 +15,7 @@ import {
   ImageSquare,
   PencilSimple,
   Plus,
+  Prohibit,
   Question,
   Warning,
   Wrench,
@@ -64,7 +65,14 @@ type Message =
   | { kind: "question"; question: string; options: AgentChoice[]; otherPicked?: boolean }
   /** Something the checks noticed and thought you'd want to know. Not an error. */
   | { kind: "note"; text: string }
+  /** A build that was called off part-way, so the silence has an explanation. */
+  | { kind: "stopped" }
   | { kind: "oops"; text: string };
+
+/** Whether a rejection is just the request being called off, rather than something wrong. */
+function isAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
 
 /** How many times a failed build is repaired without being asked. */
 const AUTO_REPAIR_LIMIT = 1;
@@ -192,6 +200,8 @@ export function Studio({
   const conversationRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  /** The build currently in flight, so New and Stop can call it off. */
+  const inFlightRef = useRef<AbortController | null>(null);
   /**
    * The code the agent last handed us, so a render failure can be traced back to it.
    *
@@ -347,10 +357,17 @@ export function Studio({
   async function streamAgent(payload: Record<string, unknown>): Promise<AgentDesign | null> {
     setActivity(IDLE_ACTIVITY);
 
+    // Aborting here closes the response, which the route hears as a disconnect and uses to
+    // stop the model call — so giving up actually stops the work rather than just the waiting.
+    const attempt = new AbortController();
+    inFlightRef.current?.abort();
+    inFlightRef.current = attempt;
+
     const response = await fetch("/api/design", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: attempt.signal,
     });
 
     // Anything rejected before the stream opens still comes back as a normal JSON error.
@@ -402,6 +419,8 @@ export function Studio({
       }
     }
 
+    if (inFlightRef.current === attempt) inFlightRef.current = null;
+
     // The activity panel disappears when the build lands, so anything the checks found has
     // to move into the conversation to survive.
     if (design && notes.length) {
@@ -445,11 +464,23 @@ export function Studio({
       // Arm the repair loop: if this code doesn't compile, it's ours to fix.
       repairRef.current = { code: built.code, goal: built.description || trimmed, attempts: 0 };
       loadDesign(built);
-    } catch {
-      setMessages((prev) => [...prev, { kind: "oops", text: "Couldn't reach the server. Is it still running?" }]);
+    } catch (error) {
+      // Being stopped isn't a failure, and Start new has already cleared the conversation
+      // this would be complaining into.
+      if (!isAbort(error)) {
+        setMessages((prev) => [...prev, { kind: "oops", text: "Couldn't reach the server. Is it still running?" }]);
+      }
     } finally {
       setWorking(false);
     }
+  }
+
+  /** Calls off the build in flight, leaving a line so the silence isn't a mystery. */
+  function stopAgent() {
+    if (!inFlightRef.current) return;
+    inFlightRef.current.abort();
+    inFlightRef.current = null;
+    setMessages((prev) => [...prev, { kind: "stopped" }]);
   }
 
   /**
@@ -482,11 +513,13 @@ export function Studio({
         // already in the conversation — adding `summary` here would say it twice.
         repairRef.current = { ...target, code: fixed.code, attempts: target.attempts + 1 };
         render(fixed.code);
-      } catch {
-        setMessages((prev) => [
-          ...prev,
-          { kind: "oops", text: "Couldn't reach the server to fix that. Is it still running?" },
-        ]);
+      } catch (error) {
+        if (!isAbort(error)) {
+          setMessages((prev) => [
+            ...prev,
+            { kind: "oops", text: "Couldn't reach the server to fix that. Is it still running?" },
+          ]);
+        }
       } finally {
         setWorking(false);
       }
@@ -595,6 +628,9 @@ export function Studio({
   }, [atStart]);
 
   function startNew() {
+    // Whatever was being built is for the project being thrown away, so stop paying for it.
+    inFlightRef.current?.abort();
+    inFlightRef.current = null;
     clearSession();
     // The address bar still names the creation that was open, so a refresh would load it
     // straight back over the blank project. Rewritten in place rather than navigated: a route
@@ -849,7 +885,7 @@ export function Studio({
                 />
               ))}
 
-              {working && <AgentActivity activity={activity} />}
+              {working && <AgentActivity activity={activity} onStop={stopAgent} />}
             </div>
           </div>
 
@@ -1219,6 +1255,15 @@ function MessageBlock({
           )}
           <p className="font-medium text-white">{message.text}</p>
         </div>
+      </div>
+    );
+  }
+
+  if (message.kind === "stopped") {
+    return (
+      <div className="animate-rise flex items-center gap-2.5 px-1 text-sm text-mist-300">
+        <Prohibit size={16} weight="duotone" className="shrink-0 text-mist-500" />
+        Stopped. Nothing was changed.
       </div>
     );
   }

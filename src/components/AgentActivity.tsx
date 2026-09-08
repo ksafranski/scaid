@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle, Wrench } from "@phosphor-icons/react";
+import { CheckCircle, Stop, Wrench } from "@phosphor-icons/react";
 import { StepIcon } from "./StepIcon";
 import type { AgentStage } from "@/lib/agentEvents";
 import type { IconName } from "@/lib/iconNames";
@@ -50,7 +50,14 @@ function headline(activity: Activity): string {
  * Every line here comes from the model's own output as it streams — the approach, then each
  * part as it's named, then the code as it's written. Nothing is invented.
  */
-export function AgentActivity({ activity }: { activity: Activity }) {
+export function AgentActivity({
+  activity,
+  onStop,
+}: {
+  activity: Activity;
+  /** Calls the build off. Sits here because this is where the work is being reported. */
+  onStop: () => void;
+}) {
   const title = headline(activity);
   const fixing = activity.stage === "fixing";
 
@@ -63,7 +70,15 @@ export function AgentActivity({ activity }: { activity: Activity }) {
           <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
         )}
         {/* The sweep says work is happening, so the resting color only applies when it isn't. */}
-        <span className="animate-sweep text-sm font-medium">{title}</span>
+        <span className="animate-sweep flex-1 text-sm font-medium">{title}</span>
+
+        <button
+          onClick={onStop}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-700 px-2.5 py-1 text-xs font-semibold text-mist-500 transition hover:border-ink-600 hover:bg-ink-700 hover:text-mist-100"
+        >
+          <Stop size={12} weight="fill" />
+          Stop
+        </button>
       </div>
 
       {activity.plan && (
