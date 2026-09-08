@@ -6,6 +6,7 @@ import {
   CaretUp,
   ChatCircleDots,
   Check,
+  CircleNotch,
   CheckCircle,
   Code,
   Eye,
@@ -959,7 +960,8 @@ export function Studio({
 
           {isRendering && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="rounded-xl border border-ink-700 bg-ink-850/90 px-5 py-3 text-sm font-medium text-mist-300 backdrop-blur">
+              <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-850/90 px-5 py-3 text-sm font-medium text-mist-300 backdrop-blur">
+                <CircleNotch size={16} weight="bold" className="animate-spin text-volt-300" />
                 Building the model…
               </div>
             </div>

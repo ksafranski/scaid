@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowCounterClockwise, Cube } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CircleNotch, Cube } from "@phosphor-icons/react";
 import type { ModelViewerElement } from "@/types/model-viewer";
 
 // The model sits Z-up like OpenSCAD; model-viewer is Y-up, so tip it a quarter turn.
@@ -70,7 +70,12 @@ export function ModelViewer({ src, spinning }: { src: string | null; spinning: b
   }, []);
 
   if (!ready) {
-    return <div className="flex h-full items-center justify-center text-sm text-mist-500">Warming up…</div>;
+    return (
+      <div className="flex h-full items-center justify-center gap-2.5 text-sm text-mist-500">
+        <CircleNotch size={16} weight="bold" className="animate-spin text-volt-300" />
+        Warming up…
+      </div>
+    );
   }
 
   return (
@@ -117,7 +122,8 @@ export function ModelViewer({ src, spinning }: { src: string | null; spinning: b
 
       {src && !modelShown && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="rounded-xl border border-ink-700 bg-ink-850/90 px-5 py-3 text-sm font-medium text-mist-300 backdrop-blur">
+          <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-850/90 px-5 py-3 text-sm font-medium text-mist-300 backdrop-blur">
+            <CircleNotch size={16} weight="bold" className="animate-spin text-volt-300" />
             Almost ready…
           </div>
         </div>
