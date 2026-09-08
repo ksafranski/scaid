@@ -443,7 +443,6 @@ export function Studio({
     // message goes. They outrank a reference photo: one says "this part of what you built",
     // the other says "build me this", and only one picture travels with a message.
     const markup = await captureMarkupRef.current?.();
-    const notes = markup?.notes ?? [];
     if (markup) image = markup.image;
 
     // A picture on its own is a complete request; fill in the words they didn't need to type.
@@ -472,7 +471,7 @@ export function Studio({
         requirements: design?.requirements,
         history,
         image: image
-          ? { mediaType: image.mediaType, data: image.data, kind: image.kind, notes }
+          ? { mediaType: image.mediaType, data: image.data, kind: image.kind }
           : undefined,
       });
       if (!built) return;

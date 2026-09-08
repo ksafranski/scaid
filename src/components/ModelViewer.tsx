@@ -5,7 +5,6 @@ import {
   ArrowCounterClockwise,
   ArrowUpRight,
   ArrowUUpLeft,
-  ChatCircleText,
   CircleNotch,
   Cube,
   Lasso,
@@ -35,12 +34,11 @@ function panModifier(): string {
   return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
 }
 
-type Tool = "region" | "arrow" | "note";
+type Tool = "region" | "arrow";
 
-/** What the composer needs back when it sends: the picture, and the words on the pins. */
+/** What the composer collects as it sends. */
 export interface Markup {
   image: PreparedImage;
-  notes: string[];
 }
 
 export function ModelViewer({
@@ -63,8 +61,6 @@ export function ModelViewer({
   const [tool, setTool] = useState<Tool | null>(null);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [drawing, setDrawing] = useState<Mark | null>(null);
-  const [noteAt, setNoteAt] = useState<MarkPoint | null>(null);
-  const [noteText, setNoteText] = useState("");
   /**
    * The mark being drawn, held in a ref as well as in state.
    *
@@ -124,8 +120,6 @@ export function ModelViewer({
     setMarks([]);
     drawingRef.current = null;
     setDrawing(null);
-    setNoteAt(null);
-    setNoteText("");
     setTool(null);
   }
 
@@ -152,12 +146,8 @@ export function ModelViewer({
       );
       if (!image) return null;
 
-      const notes = marks
-        .filter((mark): mark is Extract<Mark, { kind: "note" }> => mark.kind === "note")
-        .map((mark) => mark.text);
-
       clearAll();
-      return { image, notes };
+      return { image };
     };
 
     return () => {
@@ -212,14 +202,8 @@ export function ModelViewer({
         <div
           ref={surfaceRef}
           onPointerDown={(event) => {
-            if (!tool || noteAt) return;
+            if (!tool) return;
             const at = pointIn(event);
-
-            if (tool === "note") {
-              setNoteAt(at);
-              setNoteText("");
-              return;
-            }
 
             try {
               event.currentTarget.setPointerCapture(event.pointerId);
@@ -308,48 +292,6 @@ export function ModelViewer({
             )}
           </svg>
 
-          {/* Pins are numbered in the order they were dropped, and the picture and the text
-              use the same numbers so a note can't be matched to the wrong spot. */}
-          {marks
-            .filter((mark): mark is Extract<Mark, { kind: "note" }> => mark.kind === "note")
-            .map((mark, index) => (
-              <span
-                key={`note-${index}`}
-                title={mark.text}
-                style={{ left: mark.at.x, top: mark.at.y, backgroundColor: MARKUP_COLOR }}
-                className="pointer-events-none absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-xs font-bold text-white ring-2 ring-white"
-              >
-                {index + 1}
-              </span>
-            ))}
-
-          {noteAt && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                const text = noteText.trim();
-                if (text) addMark({ kind: "note", at: noteAt, text });
-                setNoteAt(null);
-                setNoteText("");
-              }}
-              style={{ left: noteAt.x, top: noteAt.y + 14 }}
-              className="pointer-events-auto absolute z-30 w-56 -translate-x-1/2 rounded-xl border border-ink-600 bg-ink-850 p-2 shadow-2xl"
-            >
-              <input
-                autoFocus
-                value={noteText}
-                onChange={(event) => setNoteText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setNoteAt(null);
-                    setNoteText("");
-                  }
-                }}
-                placeholder="What about this bit?"
-                className="w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-sm text-mist-100 placeholder:text-ink-500 focus:border-volt-500 focus:outline-none"
-              />
-            </form>
-          )}
         </div>
       )}
 
@@ -357,7 +299,6 @@ export function ModelViewer({
         <div className="absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-1 shadow-lg shadow-black/40">
           <ToolButton active={tool === "region"} onClick={() => setTool(tool === "region" ? null : "region")} Glyph={Lasso} label="Circle a part" />
           <ToolButton active={tool === "arrow"} onClick={() => setTool(tool === "arrow" ? null : "arrow")} Glyph={ArrowUpRight} label="Point at something" />
-          <ToolButton active={tool === "note"} onClick={() => setTool(tool === "note" ? null : "note")} Glyph={ChatCircleText} label="Leave a note" />
 
           {marks.length > 0 && (
             <>
@@ -379,9 +320,7 @@ export function ModelViewer({
             ? `${marks.length} mark${marks.length === 1 ? "" : "s"} — sent with your next message`
             : tool === "region"
               ? "Draw a loop around a part"
-              : tool === "arrow"
-                ? "Drag to point at something"
-                : "Click a spot to leave a note"}
+              : "Drag to point at something"}
         </p>
       )}
 

@@ -301,16 +301,14 @@ rewrite the description to fit the object as it now stands, still with no mentio
 
 ## When they mark up the model
 Sometimes the picture is the model you already built with marks drawn on it — loops around a part,
-arrows pointing at one, numbered pins where they left a note. That is not something to build. It's
-them pointing at your own work.
+arrows pointing at one. That is not something to build. It's them pointing at your own work.
 
 Work out which piece of your code sits under each mark and change those, leaving everything else
 exactly as it was. Name the parts you settled on in your summary ("the handle", "the rim near the
 spout") so a wrong guess is obvious immediately and costs one message instead of a whole round.
 
-A numbered pin's words arrive as text under the picture, matched to the number on the pin. Treat
-those as the instruction for that spot. If a mark genuinely covers several parts, say so and change
-the one the words point at.
+What they typed alongside says what to do about the marked parts. If a mark genuinely covers
+several parts, say so and change the one the words point at.
 
 ## When they attach a picture
 The picture is what they want to make. Look at its overall shape and build a simplified 3D version out
@@ -368,8 +366,6 @@ const RequestSchema = z.object({
       data: z.string().max(MAX_IMAGE_BASE64, "That picture is too large to send. Try a smaller one."),
       /** A photo of what to make, or the current model with a part circled on it. */
       kind: z.enum(["reference", "region"]).default("reference"),
-      /** The words on the numbered pins, in the order the picture numbers them. */
-      notes: z.array(z.string().max(400)).max(10).optional(),
     })
     .optional(),
   history: z
@@ -630,18 +626,10 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
   if (image?.kind === "region") {
     text +=
       "\n\nThe picture is the model as it looks right now, marked up in pink. Loops enclose a " +
-      "part, arrows point at one, and numbered pins are places I left a note. Those marks are " +
-      "what this message is about — the rest of the picture is only there so you can see where " +
-      "they sit. Work out which pieces of the code they correspond to and change those, " +
-      "leaving the rest alone. Say which parts you took them to mean, so I can tell you if you " +
-      "picked the wrong ones.";
-
-    const notes = image.notes ?? [];
-    if (notes.length) {
-      // The pins carry only their number; the words come as text, where nothing hinges on
-      // reading small type out of a JPEG.
-      text += `\n\nWhat the pins say:\n${notes.map((note, index) => `${index + 1}. ${note}`).join("\n")}`;
-    }
+      "part and arrows point at one. Those marks are what this message is about — the rest of " +
+      "the picture is only there so you can see where they sit. Work out which pieces of the " +
+      "code they correspond to and change those, leaving the rest alone. Say which parts you " +
+      "took them to mean, so I can tell you if you picked the wrong ones.";
   }
 
   // Images go before the text — Claude follows the instruction better in that order.

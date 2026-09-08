@@ -16,8 +16,7 @@ export interface MarkPoint {
  */
 export type Mark =
   | { kind: "region"; points: MarkPoint[] }
-  | { kind: "arrow"; from: MarkPoint; to: MarkPoint }
-  | { kind: "note"; at: MarkPoint; text: string };
+  | { kind: "arrow"; from: MarkPoint; to: MarkPoint };
 
 export const MARKUP_COLOR = "#ff2d78";
 /** Lifts the chosen area out of the picture without hiding anything around it. */
@@ -25,12 +24,6 @@ export const REGION_FILL = "rgba(255, 255, 255, 0.17)";
 
 const MAX_EDGE = 1200;
 const QUALITY = 0.82;
-
-/** The notes, in the order their pins are numbered, so the text and the picture agree. */
-export function noteTexts(marks: Mark[]): string[] {
-  return marks.filter((mark): mark is Extract<Mark, { kind: "note" }> => mark.kind === "note")
-    .map((mark) => mark.text);
-}
 
 /**
  * The view as it stands, with every mark drawn onto it.
@@ -76,11 +69,9 @@ export async function renderMarkup(
   context.lineJoin = "round";
   context.lineCap = "round";
 
-  let noteNumber = 0;
   for (const mark of marks) {
     if (mark.kind === "region") drawRegion(context, mark.points, k, weight);
-    else if (mark.kind === "arrow") drawArrow(context, mark.from, mark.to, k, weight);
-    else drawNotePin(context, mark.at, k, weight, ++noteNumber);
+    else drawArrow(context, mark.from, mark.to, k, weight);
   }
 
   const encoded = canvas.toDataURL("image/jpeg", QUALITY);
@@ -144,33 +135,6 @@ function drawArrow(
   context.lineTo(x2 - head * Math.cos(angle + Math.PI / 7), y2 - head * Math.sin(angle + Math.PI / 7));
   context.closePath();
   context.fill();
-}
-
-function drawNotePin(
-  context: CanvasRenderingContext2D,
-  at: MarkPoint,
-  k: number,
-  weight: number,
-  number: number,
-) {
-  const x = at.x * k;
-  const y = at.y * k;
-  const radius = Math.max(11, weight * 6);
-
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.fillStyle = MARKUP_COLOR;
-  context.fill();
-  context.strokeStyle = "#ffffff";
-  context.lineWidth = Math.max(1.5, weight / 2);
-  context.stroke();
-
-  // The pin carries only its number; the words travel as text, where they can't be misread.
-  context.fillStyle = "#ffffff";
-  context.font = `bold ${Math.round(radius * 1.25)}px ui-sans-serif, system-ui, sans-serif`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(String(number), x, y + radius * 0.05);
 }
 
 function loadDataUrl(url: string): Promise<HTMLImageElement | null> {
