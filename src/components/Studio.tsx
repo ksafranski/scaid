@@ -400,6 +400,9 @@ export function Studio({
         case "lines":
           setActivity((prev) => ({ ...prev, lines: event.count }));
           break;
+        case "thought":
+          setActivity((prev) => ({ ...prev, thought: event.text }));
+          break;
         case "note":
           notes.push(event.text);
           setActivity((prev) => ({ ...prev, notes: [...prev.notes, event.text] }));

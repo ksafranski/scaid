@@ -390,6 +390,20 @@ function logUsage(label: string, usage: Anthropic.Usage | undefined) {
   );
 }
 
+/**
+ * The last finished sentence of a reasoning summary, or null if there isn't one yet.
+ *
+ * Only complete sentences go out. Reasoning streams a few words at a time, and a line that
+ * rewrites itself mid-word as you read it is worse than no line at all.
+ */
+function lastCompleteThought(summary: string): string | null {
+  const sentences = summary.match(/[^.!?\n]+[.!?]/g);
+  if (!sentences) return null;
+
+  const last = sentences[sentences.length - 1].trim();
+  return last.length >= 15 ? last : null;
+}
+
 /** Models sometimes wrap code in markdown fences despite the schema description. */
 function stripFences(code: string): string {
   return code.replace(/^\s*```(?:openscad|scad)?\n?/i, "").replace(/```\s*$/, "");
@@ -424,7 +438,7 @@ async function repairCode(args: {
 }) {
   const stream = client.messages.stream({
     model: MODEL,
-    max_tokens: 16000,
+    max_tokens: 64000,
     thinking: { type: "adaptive" },
     system: [{ type: "text", text: REPAIR_SYSTEM, cache_control: { type: "ephemeral" } }],
     messages: [
@@ -436,7 +450,8 @@ async function repairCode(args: {
           `The program:\n${args.code}`,
       },
     ],
-    output_config: { format: zodOutputFormat(RepairSchema) },
+    // A repair is a named fault in code that already exists — the narrowest job here.
+    output_config: { format: zodOutputFormat(RepairSchema), effort: "low" },
   }, { signal: args.signal });
 
   const send = args.send;
@@ -613,16 +628,39 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
 
   const stream = client.messages.stream({
     model: MODEL,
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
+    /**
+     * Thinking is billed inside this, and it is spent before a single character of the
+     * answer. At 16000 a long think could consume the whole budget and leave a response
+     * with no text block at all — which is what "my answer came out muddled" was reporting.
+     * Streaming means a high ceiling costs nothing in timeouts.
+     */
+    max_tokens: 64000,
+    // Summarized rather than the default omitted: without it the reasoning streams as empty
+    // blocks and the first minute looks like a hang. This is the only content that exists
+    // before the plan, so it's what the studio shows while it waits.
+    thinking: { type: "adaptive", display: "summarized" },
     // The system prompt is byte-identical on every request from every user, so caching it
     // means we pay full price for it roughly once per five minutes instead of every time.
     // Placed explicitly rather than via top-level cache_control, which would land the
     // breakpoint on the (always different) user turn and never hit.
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
     messages,
-    output_config: { format: zodOutputFormat(DesignSchema) },
+    // Effort is the supported way to trade thinking depth against time; budget_tokens is
+    // rejected outright on this model. Default is "high", which was spending three quarters
+    // of a long build inside the thinking phase.
+    output_config: { format: zodOutputFormat(DesignSchema), effort: "medium" },
   }, { signal });
+
+  // Everything before the first character of the answer used to be silence. The reasoning
+  // summary is the only thing that exists in that window, so it fills it.
+  let lastThought = "";
+  stream.on("thinking", (_delta, snapshot) => {
+    const thought = lastCompleteThought(snapshot);
+    if (thought && thought !== lastThought) {
+      lastThought = thought;
+      send({ t: "thought", text: normalizeText(thought) });
+    }
+  });
 
   // Structured output arrives as a text block holding JSON, generated in schema order, so
   // these deltas are the model's real progress through the build — not a timer pretending.
@@ -658,6 +696,15 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
 
   if (response.stop_reason === "refusal") {
     send({ t: "error", error: "I'd rather not make that one. Want to try a different idea?" });
+    return null;
+  }
+
+  if (response.stop_reason === "max_tokens") {
+    console.error("[design] hit max_tokens before finishing the answer");
+    send({
+      t: "error",
+      error: "That one got away from me — it ran long and I lost the thread. Try asking for a bit less at once.",
+    });
     return null;
   }
 

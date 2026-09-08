@@ -64,6 +64,8 @@ export type AgentEvent =
   | { t: "part"; index: number; icon: IconName; title: string }
   /** Lines of OpenSCAD written so far. Counted from the stream, not estimated. */
   | { t: "lines"; count: number }
+  /** A summarized line of the model's reasoning, while there's nothing else to show. */
+  | { t: "thought"; text: string }
   /** Something worth saying that isn't a stage — a problem found and fixed. */
   | { t: "note"; text: string }
   /** A turn that asks instead of building. Carries no model and no code. */

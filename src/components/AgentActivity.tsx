@@ -15,6 +15,8 @@ export interface Activity {
   parts: Array<{ icon: IconName; title: string }>;
   /** Lines of code written so far, counted from the stream. */
   lines: number;
+  /** The latest line of reasoning, shown only while there's nothing better to show. */
+  thought: string | null;
   notes: string[];
 }
 
@@ -24,6 +26,7 @@ export const IDLE_ACTIVITY: Activity = {
   name: null,
   parts: [],
   lines: 0,
+  thought: null,
   notes: [],
 };
 
@@ -106,6 +109,14 @@ export function AgentActivity({
           Stop
         </button>
       </div>
+
+      {activity.stage === "thinking" && activity.thought && (
+        // Replaced as the reasoning moves on, and gone the moment the plan arrives — this is
+        // what fills the wait, not a record worth keeping.
+        <p className="border-l-2 border-ink-700 pl-3 text-sm leading-relaxed text-mist-500">
+          {activity.thought}
+        </p>
+      )}
 
       {activity.plan && (
         <p className="border-l-2 border-ink-700 pl-3 text-sm leading-relaxed text-mist-400">
