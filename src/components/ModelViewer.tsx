@@ -1,8 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowCounterClockwise, CircleNotch, Cube, Lasso, X } from "@phosphor-icons/react";
-import type { LassoPoint } from "@/lib/regionCapture";
+import {
+  ArrowCounterClockwise,
+  ArrowUpRight,
+  ArrowUUpLeft,
+  ChatCircleText,
+  CircleNotch,
+  Cube,
+  Lasso,
+  Trash,
+  type Icon,
+} from "@phosphor-icons/react";
+import { MARKUP_COLOR, REGION_FILL, renderMarkup, type Mark, type MarkPoint } from "@/lib/markup";
+import type { PreparedImage } from "@/lib/imageAttachment";
 import type { ModelViewerElement } from "@/types/model-viewer";
 
 // The model sits Z-up like OpenSCAD; model-viewer is Y-up, so tip it a quarter turn.
@@ -24,20 +35,46 @@ function panModifier(): string {
   return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
 }
 
+type Tool = "region" | "arrow" | "note";
+
+/** What the composer needs back when it sends: the picture, and the words on the pins. */
+export interface Markup {
+  image: PreparedImage;
+  notes: string[];
+}
+
 export function ModelViewer({
   src,
   spinning,
-  onRegion,
+  captureRef,
 }: {
   src: string | null;
   spinning: boolean;
-  /** Called with the loop that was drawn, plus a snapshot of what it was drawn over. */
-  onRegion?: (snapshot: string, path: LassoPoint[], width: number, height: number) => void;
+  /**
+   * Filled in with a function the composer calls as it sends.
+   *
+   * Marks aren't an attachment you add and then look at — they sit on the model where you
+   * drew them, and they're collected at the moment the message goes.
+   */
+  captureRef?: React.MutableRefObject<(() => Promise<Markup | null>) | null>;
 }) {
   const viewerRef = useRef<ModelViewerElement>(null);
-  const [lassoing, setLassoing] = useState(false);
-  const [path, setPath] = useState<LassoPoint[]>([]);
-  const drawingRef = useRef(false);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const [tool, setTool] = useState<Tool | null>(null);
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const [drawing, setDrawing] = useState<Mark | null>(null);
+  const [noteAt, setNoteAt] = useState<MarkPoint | null>(null);
+  const [noteText, setNoteText] = useState("");
+  /**
+   * The mark being drawn, held in a ref as well as in state.
+   *
+   * State drives what you see; the ref is what the handlers read. Pointer events can arrive
+   * faster than React re-renders, and a handler reading the state variable would then be
+   * looking at a stale value — reliably so when a whole gesture lands in one task.
+   */
+  const drawingRef = useRef<Mark | null>(null);
+
+  const marking = tool !== null || marks.length > 0;
   const [ready, setReady] = useState(false);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
 
@@ -74,27 +111,59 @@ export function ModelViewer({
     return () => viewer.removeEventListener("load", onLoad);
   }, [src, ready]);
 
-  /**
-   * The loop is drawn on an overlay rather than on the viewer itself.
-   *
-   * That's also what keeps the camera still while you draw: the overlay takes the pointer
-   * events, so model-viewer never sees a drag and never orbits out from under the line.
-   */
-  function pointIn(event: React.PointerEvent<HTMLDivElement>): LassoPoint {
+  function pointIn(event: React.PointerEvent<HTMLDivElement>): MarkPoint {
     const box = event.currentTarget.getBoundingClientRect();
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   }
 
-  function finishLasso(box: DOMRect) {
-    const viewer = viewerRef.current;
-    // Three points is the least that encloses anything; below that it was a stray click.
-    if (viewer && path.length >= 3 && onRegion) {
-      onRegion(viewer.toDataURL("image/jpeg", 0.92), path, box.width, box.height);
-    }
-    setPath([]);
-    setLassoing(false);
-    drawingRef.current = false;
+  function addMark(mark: Mark) {
+    setMarks((prev) => [...prev, mark]);
   }
+
+  function clearAll() {
+    setMarks([]);
+    drawingRef.current = null;
+    setDrawing(null);
+    setNoteAt(null);
+    setNoteText("");
+    setTool(null);
+  }
+
+  /**
+   * Hands the composer the marked-up view, then wipes the slate.
+   *
+   * Cleared on the way out because the marks describe the model as it looks right now — the
+   * moment the answer arrives and the shape changes, they'd be pointing at the wrong thing.
+   */
+  useEffect(() => {
+    if (!captureRef) return;
+
+    captureRef.current = async () => {
+      const viewer = viewerRef.current;
+      const surface = surfaceRef.current;
+      if (!viewer || !surface || marks.length === 0) return null;
+
+      const box = surface.getBoundingClientRect();
+      const image = await renderMarkup(
+        viewer.toDataURL("image/jpeg", 0.92),
+        marks,
+        box.width,
+        box.height,
+      );
+      if (!image) return null;
+
+      const notes = marks
+        .filter((mark): mark is Extract<Mark, { kind: "note" }> => mark.kind === "note")
+        .map((mark) => mark.text);
+
+      clearAll();
+      return { image, notes };
+    };
+
+    return () => {
+      captureRef.current = null;
+    };
+  });
 
   const resetView = useCallback(() => {
     const viewer = viewerRef.current;
@@ -119,7 +188,7 @@ export function ModelViewer({
         ref={viewerRef}
         src={src ?? ""}
         alt="Your 3D creation. Drag to spin it around."
-        camera-controls
+        {...(marking ? {} : { "camera-controls": true })}
         orientation={ORIENTATION}
         camera-orbit={HOME_ORBIT}
         camera-target={HOME_TARGET}
@@ -139,80 +208,181 @@ export function ModelViewer({
         }}
       />
 
-      {src && modelShown && lassoing && (
+      {src && modelShown && (
         <div
+          ref={surfaceRef}
           onPointerDown={(event) => {
-            // Keeps the line following the cursor if it leaves the viewer mid-loop. Throws
-            // if the pointer is already gone, which is not a reason to lose the stroke.
+            if (!tool || noteAt) return;
+            const at = pointIn(event);
+
+            if (tool === "note") {
+              setNoteAt(at);
+              setNoteText("");
+              return;
+            }
+
             try {
               event.currentTarget.setPointerCapture(event.pointerId);
             } catch {
-              // drawing still works, it just won't track outside the box
+              // The line just won't follow the cursor outside the box; not worth losing it.
             }
-            drawingRef.current = true;
-            setPath([pointIn(event)]);
+            const started: Mark =
+              tool === "region" ? { kind: "region", points: [at] } : { kind: "arrow", from: at, to: at };
+            drawingRef.current = started;
+            setDrawing(started);
           }}
           onPointerMove={(event) => {
-            if (!drawingRef.current) return;
-            const next = pointIn(event);
-            // Thin the trail out: a point per pixel is noise in the polygon and in the line.
-            setPath((prev) => {
-              const last = prev[prev.length - 1];
-              if (last && Math.hypot(next.x - last.x, next.y - last.y) < 4) return prev;
-              return [...prev, next];
-            });
+            const current = drawingRef.current;
+            if (!current) return;
+            const at = pointIn(event);
+
+            let next: Mark;
+            if (current.kind === "arrow") {
+              next = { ...current, to: at };
+            } else if (current.kind === "region") {
+              // Thin the trail: a point per pixel is noise in the polygon and in the line.
+              const last = current.points[current.points.length - 1];
+              if (last && Math.hypot(at.x - last.x, at.y - last.y) < 4) return;
+              next = { ...current, points: [...current.points, at] };
+            } else {
+              return;
+            }
+
+            drawingRef.current = next;
+            setDrawing(next);
           }}
-          onPointerUp={(event) => finishLasso(event.currentTarget.getBoundingClientRect())}
+          onPointerUp={() => {
+            // From the ref, never from inside a setDrawing updater: updaters have to be pure
+            // and development runs them twice to prove it, which committed every mark twice.
+            const current = drawingRef.current;
+            drawingRef.current = null;
+            setDrawing(null);
+            if (!current) return;
+
+            // Below these it was a stray click, not a mark.
+            if (current.kind === "region" && current.points.length >= 3) addMark(current);
+            if (
+              current.kind === "arrow" &&
+              Math.hypot(current.to.x - current.from.x, current.to.y - current.from.y) > 12
+            ) {
+              addMark(current);
+            }
+          }}
           onPointerCancel={() => {
-            setPath([]);
-            drawingRef.current = false;
+            drawingRef.current = null;
+            setDrawing(null);
           }}
-          className="absolute inset-0 z-20 cursor-crosshair"
+          className={`absolute inset-0 z-20 ${tool ? "cursor-crosshair" : "pointer-events-none"}`}
         >
           <svg className="pointer-events-none h-full w-full" aria-hidden>
-            {path.length > 1 && (
-              <polyline
-                points={path.map((point) => `${point.x},${point.y}`).join(" ")}
-                fill="rgba(255, 45, 120, 0.12)"
-                stroke="#ff2d78"
-                strokeWidth={2.5}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
+            <defs>
+              <marker id="markup-head" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                <path d="M0,0 L5,2.5 L0,5 Z" fill={MARKUP_COLOR} />
+              </marker>
+            </defs>
+
+            {[...marks, ...(drawing ? [drawing] : [])].map((mark, index) =>
+              mark.kind === "region" ? (
+                <polyline
+                  key={index}
+                  points={mark.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                  fill={REGION_FILL}
+                  stroke={MARKUP_COLOR}
+                  strokeWidth={2.5}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              ) : mark.kind === "arrow" ? (
+                <line
+                  key={index}
+                  x1={mark.from.x}
+                  y1={mark.from.y}
+                  x2={mark.to.x}
+                  y2={mark.to.y}
+                  stroke={MARKUP_COLOR}
+                  strokeWidth={2.5}
+                  strokeLinecap="round"
+                  markerEnd="url(#markup-head)"
+                />
+              ) : null,
             )}
           </svg>
 
-          {path.length === 0 && (
-            <p className="pointer-events-none absolute inset-x-0 top-5 text-center text-xs font-medium text-mist-300">
-              Draw a loop around the part you want to talk about
-            </p>
+          {/* Pins are numbered in the order they were dropped, and the picture and the text
+              use the same numbers so a note can't be matched to the wrong spot. */}
+          {marks
+            .filter((mark): mark is Extract<Mark, { kind: "note" }> => mark.kind === "note")
+            .map((mark, index) => (
+              <span
+                key={`note-${index}`}
+                title={mark.text}
+                style={{ left: mark.at.x, top: mark.at.y, backgroundColor: MARKUP_COLOR }}
+                className="pointer-events-none absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-xs font-bold text-white ring-2 ring-white"
+              >
+                {index + 1}
+              </span>
+            ))}
+
+          {noteAt && (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const text = noteText.trim();
+                if (text) addMark({ kind: "note", at: noteAt, text });
+                setNoteAt(null);
+                setNoteText("");
+              }}
+              style={{ left: noteAt.x, top: noteAt.y + 14 }}
+              className="pointer-events-auto absolute z-30 w-56 -translate-x-1/2 rounded-xl border border-ink-600 bg-ink-850 p-2 shadow-2xl"
+            >
+              <input
+                autoFocus
+                value={noteText}
+                onChange={(event) => setNoteText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setNoteAt(null);
+                    setNoteText("");
+                  }
+                }}
+                placeholder="What about this bit?"
+                className="w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-sm text-mist-100 placeholder:text-ink-500 focus:border-volt-500 focus:outline-none"
+              />
+            </form>
           )}
         </div>
       )}
 
-      {src && modelShown && onRegion && (
-        <button
-          onClick={() => {
-            setPath([]);
-            setLassoing((on) => !on);
-          }}
-          // Sits on top of whatever the model happens to look like, so it carries its own
-          // opaque background rather than tinting the scene through it — a translucent panel
-          // over a pale model left it barely there. The pink is the color the lasso draws in,
-          // so the tool is recognizable before it's ever used.
-          className={`absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-semibold shadow-lg transition ${
-            lassoing
-              ? "border-[#ff2d78] bg-[#ff2d78]/20 text-mist-100 shadow-[#ff2d78]/25"
-              : "border-[#ff2d78]/40 bg-ink-800 text-mist-100 shadow-black/40 hover:border-[#ff2d78] hover:bg-ink-700"
-          }`}
-        >
-          {lassoing ? (
-            <X size={15} weight="bold" />
-          ) : (
-            <Lasso size={15} weight="bold" className="text-[#ff2d78]" />
+      {src && modelShown && captureRef && (
+        <div className="absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-1 shadow-lg shadow-black/40">
+          <ToolButton active={tool === "region"} onClick={() => setTool(tool === "region" ? null : "region")} Glyph={Lasso} label="Circle a part" />
+          <ToolButton active={tool === "arrow"} onClick={() => setTool(tool === "arrow" ? null : "arrow")} Glyph={ArrowUpRight} label="Point at something" />
+          <ToolButton active={tool === "note"} onClick={() => setTool(tool === "note" ? null : "note")} Glyph={ChatCircleText} label="Leave a note" />
+
+          {marks.length > 0 && (
+            <>
+              <span aria-hidden className="mx-0.5 h-5 w-px bg-ink-700" />
+              <ToolButton
+                onClick={() => setMarks((prev) => prev.slice(0, -1))}
+                Glyph={ArrowUUpLeft}
+                label="Undo the last mark"
+              />
+              <ToolButton onClick={clearAll} Glyph={Trash} label="Clear all marks" />
+            </>
           )}
-          {lassoing ? "Cancel" : "Circle a part"}
-        </button>
+        </div>
+      )}
+
+      {src && modelShown && marking && (
+        <p className="pointer-events-none absolute top-20 right-5 z-20 max-w-[15rem] rounded-lg bg-ink-850/95 px-3 py-1.5 text-right text-xs font-medium text-mist-300">
+          {marks.length > 0
+            ? `${marks.length} mark${marks.length === 1 ? "" : "s"} — sent with your next message`
+            : tool === "region"
+              ? "Draw a loop around a part"
+              : tool === "arrow"
+                ? "Drag to point at something"
+                : "Click a spot to leave a note"}
+        </p>
       )}
 
       {src && modelShown && (
@@ -250,5 +420,33 @@ export function ModelViewer({
         </div>
       )}
     </div>
+  );
+}
+
+/** One markup tool. Icon-only, because three labelled buttons would cover the model. */
+function ToolButton({
+  active,
+  onClick,
+  Glyph,
+  label,
+}: {
+  active?: boolean;
+  onClick: () => void;
+  Glyph: Icon;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active ?? false}
+      style={active ? { backgroundColor: MARKUP_COLOR } : undefined}
+      className={`rounded-lg p-2 transition ${
+        active ? "text-white" : "text-mist-300 hover:bg-ink-700 hover:text-mist-100"
+      }`}
+    >
+      <Glyph size={17} weight="bold" />
+    </button>
   );
 }

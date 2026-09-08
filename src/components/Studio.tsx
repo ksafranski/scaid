@@ -40,7 +40,7 @@ import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
 import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
 import { DownloadMenu, PlateSizePicker, SizeReadout } from "./PrintControls";
 import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
-import { captureRegion, type LassoPoint } from "@/lib/regionCapture";
+import type { Markup } from "./ModelViewer";
 import { normalizeText } from "@/lib/emoji";
 import { describeCreation, type BuildStep, type Creation } from "@/lib/types";
 import { incompleteReason } from "@/lib/scadSyntax";
@@ -203,6 +203,8 @@ export function Studio({
   const promptRef = useRef<HTMLTextAreaElement>(null);
   /** The build currently in flight, so New and Stop can call it off. */
   const inFlightRef = useRef<AbortController | null>(null);
+  /** Collects whatever is drawn on the model, at the moment the message is sent. */
+  const captureMarkupRef = useRef<(() => Promise<Markup | null>) | null>(null);
   /**
    * The code the agent last handed us, so a render failure can be traced back to it.
    *
@@ -435,9 +437,19 @@ export function Studio({
   }
 
   async function submitPrompt(text: string, image: PreparedImage | null = attachment) {
+    if (working) return;
+
+    // Marks live on the model rather than in the composer, so they're collected here, as the
+    // message goes. They outrank a reference photo: one says "this part of what you built",
+    // the other says "build me this", and only one picture travels with a message.
+    const markup = await captureMarkupRef.current?.();
+    const notes = markup?.notes ?? [];
+    if (markup) image = markup.image;
+
     // A picture on its own is a complete request; fill in the words they didn't need to type.
-    const trimmed = text.trim() || (image ? "Build this from my picture." : "");
-    if (!trimmed || working) return;
+    const trimmed =
+      text.trim() || (markup ? "Have a look at what I marked." : image ? "Build this from my picture." : "");
+    if (!trimmed) return;
 
     setMessages((prev) => [...prev, { kind: "you", text: trimmed, imageUrl: image?.previewUrl }]);
     setPrompt("");
@@ -460,7 +472,7 @@ export function Studio({
         requirements: design?.requirements,
         history,
         image: image
-          ? { mediaType: image.mediaType, data: image.data, kind: image.kind }
+          ? { mediaType: image.mediaType, data: image.data, kind: image.kind, notes }
           : undefined,
       });
       if (!built) return;
@@ -706,26 +718,6 @@ export function Studio({
     } finally {
       setExporting(false);
     }
-  }
-
-  /**
-   * Turns a loop drawn on the model into the picture that goes with the next message.
-   *
-   * It uses the existing attachment slot, so it replaces a reference photo rather than
-   * joining one — a message carries a single picture, and these two mean opposite things.
-   */
-  async function attachRegion(
-    snapshot: string,
-    path: LassoPoint[],
-    width: number,
-    height: number,
-  ) {
-    const image = await captureRegion(snapshot, path, width, height);
-    if (!image) return;
-
-    setAttachment(image);
-    setAttachError(null);
-    promptRef.current?.focus({ preventScroll: true });
   }
 
   async function attachFile(file: File | undefined) {
@@ -1030,7 +1022,7 @@ export function Studio({
 
         {/* Preview */}
         <section className="relative flex min-h-0 flex-col bg-ink-900">
-          <ModelViewer src={modelUrl} spinning={isRendering} onRegion={attachRegion} />
+          <ModelViewer src={modelUrl} spinning={isRendering} captureRef={captureMarkupRef} />
 
           {isRendering && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
