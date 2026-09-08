@@ -16,7 +16,8 @@
 
   --color-volt-300: #a78bfa;
   --color-volt-400: #8b6dff;
-  --color-volt-500: #7c5cff;
+  /* Deep enough that white text on it clears WCAG AA (4.93:1); #7c5cff was 4.35. */
+  --color-volt-500: #7350fa;
   --color-volt-600: #6a46f5;
 
   --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;

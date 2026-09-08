@@ -30,7 +30,9 @@ export function TopBar({ nickname, current }: { nickname: string; current: "stud
           Library
         </NavLink>
 
-        <span className="mx-3 hidden text-sm text-mist-500 sm:inline">{nickname}</span>
+        {/* Who you are isn't somewhere you can go, so it sits outside the nav's rhythm. */}
+        <span aria-hidden className="mx-3 h-5 w-px bg-ink-700" />
+        <span className="hidden text-sm text-mist-500 sm:inline">{nickname}</span>
         <button
           onClick={logout}
           aria-label="Sign out"

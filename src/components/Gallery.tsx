@@ -40,7 +40,7 @@ export function Gallery({ nickname, creations }: { nickname: string; creations: 
             <p className="font-display mt-5 text-lg font-semibold text-mist-300">Your library is empty</p>
             <Link
               href="/studio"
-              className="mt-6 rounded-xl bg-volt-500 px-5 py-3 font-semibold text-white transition hover:bg-volt-400"
+              className="mt-6 rounded-xl bg-volt-500 px-5 py-3 font-semibold text-white transition hover:bg-volt-600"
             >
               Build something
             </Link>
@@ -68,7 +68,7 @@ export function Gallery({ nickname, creations }: { nickname: string; creations: 
                 <div className="mt-4 flex items-center gap-2">
                   <Link
                     href={`/studio?id=${creation.id}`}
-                    className="flex-1 rounded-xl bg-volt-500 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-volt-400"
+                    className="flex-1 rounded-xl bg-volt-500 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-volt-600"
                   >
                     Open
                   </Link>

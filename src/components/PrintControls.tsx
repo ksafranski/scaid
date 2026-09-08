@@ -50,7 +50,7 @@ export function PlateSizePicker({
       {/* The picker stays put in custom mode, so choosing a preset is always one click away. */}
       <Dropdown
         label="Build plate size"
-        icon={<SquaresFour size={16} weight="duotone" />}
+        icon={<SquaresFour size={16} weight="duotone" className="text-cyan-400" />}
         value={custom ? CUSTOM : String(plateSizeMm)}
         options={options}
         onChange={(next) => {
@@ -166,7 +166,7 @@ export function DownloadMenu({
         aria-expanded={open}
         className="flex items-center gap-1.5 rounded-xl border border-ink-700 px-3.5 py-2 text-sm font-semibold text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100 disabled:opacity-60"
       >
-        <DownloadSimple size={16} weight="duotone" />
+        <DownloadSimple size={16} weight="duotone" className="text-emerald-400" />
         {busy ? "Exporting…" : "Download"}
         <CaretDown size={12} weight="bold" />
       </button>

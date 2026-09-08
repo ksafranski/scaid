@@ -5,10 +5,12 @@ import {
   CaretDown,
   CaretUp,
   ChatCircleDots,
-  Code,
-  ImageSquare,
+  Check,
   CheckCircle,
+  Code,
   Eye,
+  FloppyDisk,
+  ImageSquare,
   PencilSimple,
   Plus,
   Question,
@@ -717,7 +719,7 @@ export function Studio({
               <span className="text-mist-300">Start over?</span>
               <button
                 onClick={startNew}
-                className="rounded-lg bg-volt-500 px-3 py-1.5 font-semibold text-white transition hover:bg-volt-400"
+                className="rounded-lg bg-volt-500 px-3 py-1.5 font-semibold text-white transition hover:bg-volt-600"
               >
                 {hasUnsavedWork ? "Discard & start" : "Start new"}
               </button>
@@ -731,7 +733,7 @@ export function Studio({
           ) : (
             <button
               onClick={() => (hasUnsavedWork ? setConfirmingNew(true) : startNew())}
-              className="flex items-center gap-1.5 rounded-xl border border-ink-700 px-3 py-2 text-sm font-semibold text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100"
+              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold text-mist-500 transition hover:bg-ink-800 hover:text-mist-100"
             >
               <Plus size={15} weight="bold" />
               New
@@ -749,13 +751,37 @@ export function Studio({
 
           {design && (
             <>
+              <span aria-hidden className="h-5 w-px bg-ink-700" />
               <DownloadMenu onDownloadScad={downloadScad} onDownloadStl={downloadStl} busy={exporting} />
+              {/*
+                The one filled control in the toolbar, and only while there's work to lose.
+                Once it's saved there is nothing to do here, so it drops back to a quiet
+                confirmation rather than sitting there looking like an action.
+              */}
               <button
                 onClick={save}
                 disabled={saveState !== "idle"}
-                className="rounded-xl border border-ink-700 px-4 py-2 text-sm font-semibold text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100 disabled:opacity-60"
+                className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  saveState === "saved"
+                    ? "text-mist-300"
+                    : saveState === "saving"
+                      ? "border border-ink-700 text-mist-500"
+                      : "bg-volt-500 text-white shadow-lg shadow-volt-500/20 hover:bg-volt-600"
+                }`}
               >
-                {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : "Save to library"}
+                {saveState === "saved" ? (
+                  <>
+                    <Check size={15} weight="bold" />
+                    Saved
+                  </>
+                ) : saveState === "saving" ? (
+                  "Saving…"
+                ) : (
+                  <>
+                    <FloppyDisk size={16} weight="duotone" />
+                    Save to library
+                  </>
+                )}
               </button>
             </>
           )}
@@ -887,7 +913,7 @@ export function Studio({
               <button
                 type="submit"
                 disabled={working || (!prompt.trim() && !attachment)}
-                className="rounded-xl bg-volt-500 px-4 py-3 font-semibold whitespace-nowrap text-white transition hover:bg-volt-400 disabled:opacity-40"
+                className="rounded-xl bg-volt-500 px-4 py-3 font-semibold whitespace-nowrap text-white transition hover:bg-volt-600 disabled:opacity-40"
               >
                 Build
               </button>
@@ -1232,7 +1258,7 @@ function RenderProblem({
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
           onClick={onFix}
-          className="rounded-lg bg-volt-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-volt-400"
+          className="rounded-lg bg-volt-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-volt-600"
         >
           Ask Scaid to fix it
         </button>
@@ -1275,7 +1301,7 @@ function ViewButton({
         active ? "bg-ink-700 text-mist-100" : "text-mist-500 hover:text-mist-300"
       }`}
     >
-      <Glyph size={16} weight="duotone" />
+      <Glyph size={16} weight="duotone" className={active ? "text-volt-300" : undefined} />
       {children}
     </button>
   );

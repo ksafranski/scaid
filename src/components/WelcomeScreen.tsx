@@ -138,7 +138,7 @@ export function WelcomeScreen() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-xl bg-volt-500 px-6 py-3.5 font-semibold text-white transition hover:bg-volt-400 disabled:opacity-50"
+              className="w-full rounded-xl bg-volt-500 px-6 py-3.5 font-semibold text-white transition hover:bg-volt-600 disabled:opacity-50"
             >
               {busy ? "One moment…" : isSignup ? "Create account" : "Sign in"}
             </button>
