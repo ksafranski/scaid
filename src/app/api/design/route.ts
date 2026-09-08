@@ -379,9 +379,13 @@ function logUsage(label: string, usage: Anthropic.Usage | undefined) {
   if (!usage) return;
   const cacheRead = usage.cache_read_input_tokens ?? 0;
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  // Thinking is billed inside output_tokens and happens before a single character of the
+  // answer, so it's the number that explains a long wait. Without it a slow request and a
+  // stuck one look identical in the log.
+  const thinking = usage.output_tokens_details?.thinking_tokens ?? 0;
   console.log(
     `[${label}] in=${usage.input_tokens} out=${usage.output_tokens} ` +
-      `cache_read=${cacheRead} cache_write=${cacheWrite} ` +
+      `(thinking=${thinking}) cache_read=${cacheRead} cache_write=${cacheWrite} ` +
       `(${cacheRead > 0 ? "cache HIT" : cacheWrite > 0 ? "cache written" : "no cache"})`,
   );
 }

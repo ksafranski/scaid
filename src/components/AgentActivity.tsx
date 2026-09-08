@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { CheckCircle, Stop, Wrench } from "@phosphor-icons/react";
 import { StepIcon } from "./StepIcon";
 import type { AgentStage } from "@/lib/agentEvents";
@@ -26,8 +27,31 @@ export const IDLE_ACTIVITY: Activity = {
   notes: [],
 };
 
+/**
+ * Seconds since the build started, while it's still in the phase that shows nothing else.
+ *
+ * The thinking phase is the long one — measured at 49 seconds of a 70 second build on a
+ * complex request with a picture, better than two thirds of the wait — and until now it
+ * looked exactly like a hang. A number that moves is the difference between "working" and
+ * "stuck", and it's the only honest thing there is to report before the first token.
+ */
+function useElapsedSeconds(counting: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!counting) return;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setSeconds(Math.round((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [counting]);
+
+  return seconds;
+}
+
 /** The headline for each phase. */
-function headline(activity: Activity): string {
+function headline(activity: Activity, seconds: number): string {
   switch (activity.stage) {
     case "parts":
       return activity.parts.length ? "Working out the parts" : "Planning the build";
@@ -38,9 +62,10 @@ function headline(activity: Activity): string {
     case "fixing":
       return "Fixing a problem";
     default:
-      // Before the first token there is genuinely nothing to report, and saying so plainly
-      // beats inventing progress that hasn't happened.
-      return "Thinking…";
+      // Before the first token there is genuinely nothing to report except how long it has
+      // been, so that's what gets reported. Held back for a few seconds so a quick turn
+      // doesn't flash a counter on its way past.
+      return seconds >= 3 ? `Thinking… ${seconds}s` : "Thinking…";
   }
 }
 
@@ -58,8 +83,9 @@ export function AgentActivity({
   /** Calls the build off. Sits here because this is where the work is being reported. */
   onStop: () => void;
 }) {
-  const title = headline(activity);
   const fixing = activity.stage === "fixing";
+  const seconds = useElapsedSeconds(activity.stage === "thinking");
+  const title = headline(activity, seconds);
 
   return (
     <div className="animate-rise space-y-3 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3.5">
