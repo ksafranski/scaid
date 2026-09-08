@@ -411,7 +411,13 @@ function friendlyApiError(error: unknown): string {
  * actually wrong while the corrected code is still being written, rather than watching a
  * spinner for the whole pass.
  */
-async function repairCode(args: { code: string; fault: string; goal?: string; send?: Send }) {
+async function repairCode(args: {
+  code: string;
+  fault: string;
+  goal?: string;
+  send?: Send;
+  signal: AbortSignal;
+}) {
   const stream = client.messages.stream({
     model: MODEL,
     max_tokens: 16000,
@@ -427,7 +433,7 @@ async function repairCode(args: { code: string; fault: string; goal?: string; se
       },
     ],
     output_config: { format: zodOutputFormat(RepairSchema) },
-  });
+  }, { signal: args.signal });
 
   const send = args.send;
   if (send) {
@@ -466,28 +472,62 @@ export async function POST(request: Request) {
   }
   const body = parsedBody.data;
 
+  const encoder = new TextEncoder();
+  /** Cuts the model call short when there is no longer anyone to send it to. */
+  const upstream = new AbortController();
+  /**
+   * Whether the response stream can still be written to.
+   *
+   * Set from two directions: our own completion, and the browser hanging up. The second one
+   * is why it lives out here — a reload or a click on New during a 40-second build cancels
+   * the response, and the model call carries on firing progress events at a controller that
+   * is already gone.
+   */
+  let closed = false;
+
   // Once bytes are on the wire the status code is already 200, so from here on every failure
   // travels as an `error` event instead. Anything that can be rejected outright is above.
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const encoder = new TextEncoder();
-      let closed = false;
-
       const send = (event: AgentEvent) => {
         if (closed) return;
-        controller.enqueue(encoder.encode(encodeEvent(event)));
+        try {
+          controller.enqueue(encoder.encode(encodeEvent(event)));
+        } catch {
+          // The reader went away between the check and the write. Nothing left to say, and
+          // nothing worth logging: this is a browser closing a tab, not a fault.
+          closed = true;
+        }
       };
 
       try {
-        const design = body.repair ? await runRepair(body, send) : await runDesign(body, send);
+        const design = body.repair
+          ? await runRepair(body, send, upstream.signal)
+          : await runDesign(body, send, upstream.signal);
         if (design) send({ t: "design", design });
       } catch (error) {
-        console.error("[design] failed:", error);
-        send({ t: "error", error: friendlyApiError(error) });
+        // A disconnect surfaces here as an abort. It isn't a failure, and there's no one to
+        // tell about it either way.
+        if (!closed) {
+          console.error("[design] failed:", error);
+          send({ t: "error", error: friendlyApiError(error) });
+        }
       } finally {
-        closed = true;
-        controller.close();
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // Raced with a cancel. The stream is gone, which is all close() wanted.
+          }
+        }
       }
+    },
+
+    cancel() {
+      console.log("[design] client disconnected, stopping the model call");
+      closed = true;
+      upstream.abort();
     },
   });
 
@@ -506,7 +546,7 @@ type Send = (event: AgentEvent) => void;
 type Body = z.infer<typeof RequestSchema>;
 
 /** The repair path: the browser's renderer rejected code we just produced. */
-async function runRepair(body: Body, send: Send) {
+async function runRepair(body: Body, send: Send, signal: AbortSignal) {
   const repair = body.repair!;
   send({ t: "stage", stage: "fixing" });
 
@@ -515,6 +555,7 @@ async function runRepair(body: Body, send: Send) {
     fault: `OpenSCAD reported:\n${repair.error}`,
     goal: repair.goal,
     send,
+    signal,
   });
   if (!fixed) {
     send({ t: "error", error: "I couldn't work out that error. Try describing the fix you want." });
@@ -531,7 +572,7 @@ async function runRepair(body: Body, send: Send) {
 }
 
 /** The main path: design something, then check what came out. */
-async function runDesign(body: Body, send: Send) {
+async function runDesign(body: Body, send: Send, signal: AbortSignal) {
   const { prompt, currentCode, history, image } = body;
 
   let text = currentCode
@@ -577,7 +618,7 @@ async function runDesign(body: Body, send: Send) {
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
     messages,
     output_config: { format: zodOutputFormat(DesignSchema) },
-  });
+  }, { signal });
 
   // Structured output arrives as a text block holding JSON, generated in schema order, so
   // these deltas are the model's real progress through the build — not a timer pretending.
@@ -652,6 +693,7 @@ async function runDesign(body: Body, send: Send) {
       fault: problems.map((problem) => problem.detail).join("\n"),
       goal: parsed.description,
       send,
+      signal,
     });
     // A failed repair isn't fatal — the browser will report the real error and offer a fix.
     if (fixed) code = stripFences(fixed.code);
