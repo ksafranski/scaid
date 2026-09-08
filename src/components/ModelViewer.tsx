@@ -196,13 +196,21 @@ export function ModelViewer({
             setPath([]);
             setLassoing((on) => !on);
           }}
-          className={`absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold backdrop-blur transition ${
+          // Sits on top of whatever the model happens to look like, so it carries its own
+          // opaque background rather than tinting the scene through it — a translucent panel
+          // over a pale model left it barely there. The pink is the color the lasso draws in,
+          // so the tool is recognizable before it's ever used.
+          className={`absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-semibold shadow-lg transition ${
             lassoing
-              ? "border-[#ff2d78] bg-[#ff2d78]/15 text-mist-100"
-              : "border-ink-700 bg-ink-850/90 text-mist-300 hover:border-ink-600 hover:text-mist-100"
+              ? "border-[#ff2d78] bg-[#ff2d78]/20 text-mist-100 shadow-[#ff2d78]/25"
+              : "border-[#ff2d78]/40 bg-ink-800 text-mist-100 shadow-black/40 hover:border-[#ff2d78] hover:bg-ink-700"
           }`}
         >
-          {lassoing ? <X size={14} weight="bold" /> : <Lasso size={14} weight="bold" />}
+          {lassoing ? (
+            <X size={15} weight="bold" />
+          ) : (
+            <Lasso size={15} weight="bold" className="text-[#ff2d78]" />
+          )}
           {lassoing ? "Cancel" : "Circle a part"}
         </button>
       )}
