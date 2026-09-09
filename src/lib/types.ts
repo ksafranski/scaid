@@ -50,6 +50,8 @@ export interface CreationDoc {
   /** What changed on the turn this was saved. */
   summary: string;
   steps: BuildStep[];
+  /** Set once the name and description are the person's own words, not the agent's. */
+  titled?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -63,6 +65,7 @@ export interface Creation {
   description?: string;
   summary: string;
   steps: BuildStep[];
+  titled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -81,6 +84,7 @@ export function toCreation(doc: CreationDoc): Creation {
     description: doc.description,
     summary: doc.summary,
     steps: doc.steps,
+    titled: doc.titled,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

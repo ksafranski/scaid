@@ -47,10 +47,17 @@ export async function POST(request: Request) {
   };
 
   if (typeof id === "string" && ObjectId.isValid(id)) {
+    // A name the person wrote themselves outlives the agent's. Without this, the next build
+    // would quietly put the generated wording back and the rename would look like a bug.
+    const existing = await collection.findOne({ _id: new ObjectId(id), userId: user._id });
+    const changes = existing?.titled
+      ? { ...fields, name: existing.name, description: existing.description ?? "" }
+      : fields;
+
     // Scoping the filter by userId means one person can never overwrite another's work.
     const updated = await collection.findOneAndUpdate(
       { _id: new ObjectId(id), userId: user._id },
-      { $set: fields },
+      { $set: changes },
       { returnDocument: "after" },
     );
     if (!updated) return NextResponse.json({ error: "We couldn't find that creation." }, { status: 404 });
