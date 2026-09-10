@@ -50,6 +50,8 @@ export interface CreationDoc {
   /** What changed on the turn this was saved. */
   summary: string;
   steps: BuildStep[];
+  /** The maker's own write-up, in Markdown. Absent on anything saved before readmes. */
+  readme?: string;
   /** Set once the name and description are the person's own words, not the agent's. */
   titled?: boolean;
   createdAt: Date;
@@ -65,9 +67,20 @@ export interface Creation {
   description?: string;
   summary: string;
   steps: BuildStep[];
+  readme?: string;
   titled?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A saved readme with nothing built behind it yet — a plan written before the model.
+ *
+ * The code is what makes a record a build, so its absence is what makes one a draft; there
+ * is no separate flag to keep in step with it.
+ */
+export function isDraft(creation: Pick<Creation, "code">): boolean {
+  return !creation.code.trim();
 }
 
 /** What to show as a build's description, falling back for records saved before the split. */
@@ -84,6 +97,7 @@ export function toCreation(doc: CreationDoc): Creation {
     description: doc.description,
     summary: doc.summary,
     steps: doc.steps,
+    readme: doc.readme,
     titled: doc.titled,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

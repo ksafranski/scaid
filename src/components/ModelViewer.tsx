@@ -36,6 +36,42 @@ function panModifier(): string {
 
 type Tool = "region" | "arrow";
 
+/**
+ * What a spec-document snapshot gets painted onto.
+ *
+ * The viewer is transparent so the studio's background shows through, but a transparent PNG
+ * lands on the white page of a document with the grid and the shadows — both drawn for a
+ * dark backdrop — sitting on nothing. Flattening onto the studio's own color keeps the
+ * picture looking like the thing they were just looking at.
+ */
+const SNAPSHOT_BACKDROP = "#0b0e14"; // --color-ink-900, the preview panel's own background
+
+/** Enough for a full-page picture in a document, without a megabyte of PNG. */
+const SNAPSHOT_MAX_EDGE = 1600;
+
+/** Draws the viewer's transparent snapshot onto the studio's background. */
+async function flatten(snapshot: string): Promise<string | null> {
+  const source = await new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = snapshot;
+  });
+  if (!source?.naturalWidth) return null;
+
+  const fit = Math.min(1, SNAPSHOT_MAX_EDGE / Math.max(source.naturalWidth, source.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(source.naturalWidth * fit);
+  canvas.height = Math.round(source.naturalHeight * fit);
+
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.fillStyle = SNAPSHOT_BACKDROP;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
 /** What the composer collects as it sends. */
 export interface Markup {
   image: PreparedImage;
@@ -45,6 +81,7 @@ export function ModelViewer({
   src,
   spinning,
   captureRef,
+  snapshotRef,
 }: {
   src: string | null;
   spinning: boolean;
@@ -55,6 +92,11 @@ export function ModelViewer({
    * drew them, and they're collected at the moment the message goes.
    */
   captureRef?: React.MutableRefObject<(() => Promise<Markup | null>) | null>;
+  /**
+   * Filled in with a function that returns the view as a PNG data URL, for the spec
+   * document. Null while there's nothing on screen worth picturing.
+   */
+  snapshotRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
 }) {
   const viewerRef = useRef<ModelViewerElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -154,6 +196,26 @@ export function ModelViewer({
       captureRef.current = null;
     };
   });
+
+  /**
+   * The view as it stands, as a picture.
+   *
+   * Whatever they've spun the model to is the shot — a spec is written about the angle the
+   * person chose to look at it from, not about a canonical pose they never saw.
+   */
+  useEffect(() => {
+    if (!snapshotRef) return;
+
+    snapshotRef.current = async () => {
+      const viewer = viewerRef.current;
+      if (!viewer || !modelShown) return null;
+      return flatten(viewer.toDataURL("image/png"));
+    };
+
+    return () => {
+      snapshotRef.current = null;
+    };
+  }, [snapshotRef, modelShown]);
 
   const resetView = useCallback(() => {
     const viewer = viewerRef.current;

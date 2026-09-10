@@ -58,6 +58,15 @@ textarea[data-code-editor]:focus-visible {
   outline: none;
 }
 
+/*
+ * The spec document takes focus when it opens, so Escape and the scroll keys act on it
+ * rather than on the studio behind it. It's a page of content at that point rather than a
+ * control, and the ring would simply outline the whole window.
+ */
+[data-spec-document]:focus-visible {
+  outline: none;
+}
+
 @layer base {
   /*
    * Tailwind v4 leaves buttons on the browser default of `cursor: default` (v3 set `pointer`).

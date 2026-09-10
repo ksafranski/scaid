@@ -15,7 +15,7 @@ import {
 import { TopBar } from "./TopBar";
 import { useLibraryView } from "@/hooks/useLibraryView";
 import { normalizeText } from "@/lib/emoji";
-import { describeCreation, type Creation } from "@/lib/types";
+import { describeCreation, isDraft, type Creation } from "@/lib/types";
 import { forgetIfSaved } from "@/lib/studioSession";
 
 export function Gallery({ nickname, creations }: { nickname: string; creations: Creation[] }) {
@@ -36,7 +36,8 @@ export function Gallery({ nickname, creations }: { nickname: string; creations: 
     if (!needle) return creations;
 
     return creations.filter((creation) =>
-      [creation.name, describeCreation(creation), creation.prompt]
+      // The readme is in here because for a draft it's the only thing there is to match on.
+      [creation.name, describeCreation(creation), creation.prompt, creation.readme ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(needle),
@@ -150,9 +151,14 @@ export function Gallery({ nickname, creations }: { nickname: string; creations: 
                   />
                 ) : view === "cards" ? (
                   <>
-                    <h2 className="font-display font-bold">{normalizeText(creation.name)}</h2>
+                    <div className="flex items-start gap-2">
+                      <h2 className="min-w-0 flex-1 font-display font-bold">
+                        {normalizeText(creation.name)}
+                      </h2>
+                      {isDraft(creation) && <DraftTag />}
+                    </div>
                     <p className="mt-2 line-clamp-4 flex-1 text-sm leading-relaxed text-mist-300">
-                      {normalizeText(describeCreation(creation))}
+                      {blurb(creation)}
                     </p>
                     <p className="mt-4 text-xs text-mist-500">{savedOn(creation)}</p>
 
@@ -176,10 +182,13 @@ export function Gallery({ nickname, creations }: { nickname: string; creations: 
                 ) : (
                   <div className="flex items-center gap-4">
                     <div className="min-w-0 flex-1">
-                      <h2 className="truncate font-display font-bold">{normalizeText(creation.name)}</h2>
-                      <p className="truncate text-sm text-mist-300">
-                        {normalizeText(describeCreation(creation))}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <h2 className="truncate font-display font-bold">
+                          {normalizeText(creation.name)}
+                        </h2>
+                        {isDraft(creation) && <DraftTag />}
+                      </div>
+                      <p className="truncate text-sm text-mist-300">{blurb(creation)}</p>
                     </div>
 
                     <p className="hidden shrink-0 text-xs text-mist-500 sm:block">{savedOn(creation)}</p>
@@ -208,6 +217,27 @@ export function Gallery({ nickname, creations }: { nickname: string; creations: 
         )}
       </main>
     </div>
+  );
+}
+
+/**
+ * The line under the name.
+ *
+ * A draft has no description because nothing has described it yet — the agent writes that
+ * when it builds. Saying so is more use than an empty row where the words should be.
+ */
+function blurb(creation: Creation): string {
+  const described = normalizeText(describeCreation(creation));
+  if (described.trim()) return described;
+  return isDraft(creation) ? "A written plan — nothing built yet." : "";
+}
+
+/** Marks a record that's a plan rather than a build, in both library layouts. */
+function DraftTag() {
+  return (
+    <span className="shrink-0 rounded-md bg-ink-800 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-mist-500 uppercase">
+      Draft
+    </span>
   );
 }
 

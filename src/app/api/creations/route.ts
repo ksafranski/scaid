@@ -26,10 +26,14 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Please log in first." }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { id, name, prompt, code, description, summary, steps } = body ?? {};
+  const { id, name, prompt, code, description, summary, steps, readme } = body ?? {};
 
-  if (typeof code !== "string" || !code.trim()) {
-    return NextResponse.json({ error: "There's no code to save yet." }, { status: 400 });
+  // A readme on its own is a saveable record: a plan written before the model exists is
+  // still work worth keeping. Only a record with neither is nothing at all.
+  const hasCode = typeof code === "string" && Boolean(code.trim());
+  const hasReadme = typeof readme === "string" && Boolean(readme.trim());
+  if (!hasCode && !hasReadme) {
+    return NextResponse.json({ error: "There's nothing to save yet." }, { status: 400 });
   }
 
   const db = await getDb();
@@ -39,10 +43,13 @@ export async function POST(request: Request) {
   const fields = {
     name: typeof name === "string" && name.trim() ? name.trim().slice(0, 80) : "Untitled creation",
     prompt: typeof prompt === "string" ? prompt.slice(0, 2000) : "",
-    code,
+    code: hasCode ? (code as string) : "",
     description: typeof description === "string" ? description.slice(0, 500) : "",
     summary: typeof summary === "string" ? summary.slice(0, 2000) : "",
     steps: Array.isArray(steps) ? (steps.slice(0, 20) as BuildStep[]) : [],
+    // The maker's own words, so unlike the name and description there's no agent version
+    // of this to protect it from — it's saved as written every time.
+    readme: typeof readme === "string" ? readme.slice(0, 20_000) : "",
     updatedAt: now,
   };
 

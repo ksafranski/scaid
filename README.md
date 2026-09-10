@@ -10,10 +10,17 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
   choice.
 - **Then change it yourself** — switch the left panel to Code and edit directly. The model
   re-renders as you type, and only when the code actually compiles; errors point at the line.
+- **Say what it's for** — the Readme panel is a Markdown editor for the project itself: the
+  plan, the measurements you took, what to try next. It's yours, so the agent never rewrites it,
+  and a readme saves on its own — you can keep a plan in your library before there's a model.
 - **Print it** — set your build plate size (remembered on your account), see the model's real
   dimensions with a warning when it won't fit, and download STL for your slicer or SCAD for
   OpenSCAD.
-- **Keep it** — builds save to your account and reopen for further work.
+- **Write it up** — open the spec document for your readme, the picture, the measurements, the
+  reasoning and the code as one page. Copy it straight into a Google Doc, or save it as Markdown
+  with the picture alongside.
+- **Keep it** — builds save to your account and reopen for further work. A record with a readme
+  and no model yet is a draft, tagged as one in the library, and opens straight back to the writing.
 
 ## Getting started
 
@@ -97,6 +104,10 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/hooks/usePanelWidth.ts` | Draggable panel width, remembered per browser |
 | `src/lib/studioSession.ts` | Keeps unsaved work alive across navigation and reloads |
 | `src/lib/exportStl.ts`, `src/components/PrintControls.tsx` | STL/SCAD download, plate size, fit check |
+| `src/components/ReadmeEditor.tsx` | The project readme: a Markdown editor with a preview |
+| `src/lib/markdown.ts`, `src/components/Markdown.tsx` | Small Markdown reader, and the same AST drawn as React |
+| `src/lib/specDocument.ts`, `src/components/SpecDocumentModal.tsx` | The spec document, and its Markdown, HTML and plain-text renderings |
+| `src/lib/zip.ts` | Store-only ZIP writer, so the Markdown and its picture download together |
 | `src/components/Logo.tsx`, `public/logo.svg`, `src/app/manifest.ts` | The mark, and the installable-app metadata built from it |
 | `src/app/api/settings` | Per-account printer settings |
 | `src/lib/imageAttachment.ts` | Downscales attached pictures in the browser before upload |

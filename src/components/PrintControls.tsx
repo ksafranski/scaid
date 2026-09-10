@@ -6,6 +6,7 @@ import {
   CaretDown,
   CodeBlock,
   DownloadSimple,
+  FileText,
   Ruler,
   SquaresFour,
   Warning,
@@ -130,10 +131,12 @@ export function SizeReadout({ size, plateSizeMm }: { size: ModelSize; plateSizeM
 export function DownloadMenu({
   onDownloadScad,
   onDownloadStl,
+  onOpenSpec,
   busy,
 }: {
   onDownloadScad: () => void;
   onDownloadStl: () => void;
+  onOpenSpec: () => void;
   busy: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -192,6 +195,17 @@ export function DownloadMenu({
             onClick={() => {
               setOpen(false);
               onDownloadScad();
+            }}
+          />
+          {/* Not a file the way the other two are — it opens the write-up, which is where
+              you then choose between the clipboard and a Markdown folder. */}
+          <MenuItem
+            Glyph={FileText}
+            title="Spec document"
+            detail="The picture, the measurements and the code, written up"
+            onClick={() => {
+              setOpen(false);
+              onOpenSpec();
             }}
           />
         </div>

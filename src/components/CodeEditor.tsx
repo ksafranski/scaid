@@ -7,7 +7,8 @@ import { errorLine as lineOf, firstProblem } from "@/lib/scadErrors";
 
 // Comments are deliberately the brightest thing here: in Scaid they carry the explanation,
 // so they should read as content rather than as something dimmed out of the way.
-const TOKEN_CLASS: Record<TokenKind, string> = {
+// Exported so the spec document colors its code the same way this editor does.
+export const TOKEN_CLASS: Record<TokenKind, string> = {
   comment: "text-emerald-400",
   string: "text-orange-300",
   number: "text-amber-400",

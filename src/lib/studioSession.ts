@@ -28,7 +28,9 @@ export interface StudioSnapshot {
   design: StoredDesign | null;
   savedId: string | null;
   lastPrompt: string;
-  view: "chat" | "code";
+  /** The maker's own write-up. Absent on a session stored before readmes existed. */
+  readme?: string;
+  view: "chat" | "code" | "readme";
   saved: boolean;
 }
 

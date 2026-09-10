@@ -13,6 +13,7 @@ import {
   Eye,
   FloppyDisk,
   ImageSquare,
+  Notebook,
   PencilSimple,
   Plus,
   Prohibit,
@@ -25,6 +26,7 @@ import {
 import { ModelViewer } from "./ModelViewer";
 import { TopBar } from "./TopBar";
 import { CodeEditor } from "./CodeEditor";
+import { ReadmeEditor } from "./ReadmeEditor";
 import { StepIcon } from "./StepIcon";
 import { AgentActivity, IDLE_ACTIVITY, type Activity } from "./AgentActivity";
 import {
@@ -39,10 +41,13 @@ import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
 import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
 import { DownloadMenu, PlateSizePicker, SizeReadout } from "./PrintControls";
+import { SpecDocumentModal } from "./SpecDocumentModal";
+import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
 import type { Markup } from "./ModelViewer";
 import { normalizeText } from "@/lib/emoji";
-import { describeCreation, type BuildStep, type Creation } from "@/lib/types";
+import { describeCreation, isDraft, type BuildStep, type Creation } from "@/lib/types";
+import { readmeTitle } from "@/lib/markdown";
 import { incompleteReason } from "@/lib/scadSyntax";
 
 interface Design {
@@ -192,7 +197,15 @@ export function Studio({
   const [activity, setActivity] = useState<Activity>(IDLE_ACTIVITY);
   /** What the code being edited is still missing, or null when it's ready to compile. */
   const [incomplete, setIncomplete] = useState<string | null>(null);
-  const [view, setView] = useState<"chat" | "code">("chat");
+  const [view, setView] = useState<"chat" | "code" | "readme">("chat");
+  /**
+   * The maker's own write-up of the project, in Markdown.
+   *
+   * Held apart from `design` on purpose: everything in there is the agent's and gets
+   * replaced wholesale on the next turn, while this is theirs and must survive every
+   * rebuild of the model it describes.
+   */
+  const [readme, setReadme] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
   const restoredRef = useRef(false);
@@ -205,6 +218,8 @@ export function Studio({
   const inFlightRef = useRef<AbortController | null>(null);
   /** Collects whatever is drawn on the model, at the moment the message is sent. */
   const captureMarkupRef = useRef<(() => Promise<Markup | null>) | null>(null);
+  /** Takes the viewer's picture, for the spec document. */
+  const snapshotRef = useRef<(() => Promise<string | null>) | null>(null);
   /**
    * The code the agent last handed us, so a render failure can be traced back to it.
    *
@@ -289,6 +304,7 @@ export function Studio({
     setDesign(snapshot.design);
     setSavedId(snapshot.savedId);
     setLastPrompt(snapshot.lastPrompt);
+    setReadme(snapshot.readme ?? "");
     setView(snapshot.view);
     setSaveState(snapshot.saved ? "saved" : "idle");
 
@@ -305,10 +321,11 @@ export function Studio({
       design,
       savedId,
       lastPrompt,
+      readme,
       view,
       saved: saveState === "saved",
     });
-  }, [messages, design, savedId, lastPrompt, view, saveState]);
+  }, [messages, design, savedId, lastPrompt, readme, view, saveState]);
 
   /**
    * Creations already loaded from the URL, so each one opens exactly once.
@@ -337,6 +354,17 @@ export function Studio({
 
       setSavedId(creation.id);
       setLastPrompt(creation.prompt);
+      setReadme(creation.readme ?? "");
+
+      // A draft has no model and no conversation behind it — only the writing. Opening it
+      // onto an empty chat panel would look like the plan had been lost, so it opens where
+      // it was left. The studio is otherwise blank, ready for the first build.
+      if (isDraft(creation)) {
+        setView("readme");
+        setSaveState("saved");
+        return;
+      }
+
       setMessages([
         { kind: "you", text: creation.prompt || "(opened from your library)" },
         { kind: "scaid", design: creation, describeObject: true },
@@ -595,6 +623,15 @@ export function Studio({
     if (editTimerRef.current) clearTimeout(editTimerRef.current);
   }, []);
 
+  /**
+   * Writing in the readme is work worth keeping, so it un-saves the build the way editing
+   * the code does. Nothing here touches the model — no render, no debounce.
+   */
+  function editReadme(next: string) {
+    setReadme(next);
+    setSaveState("idle");
+  }
+
   /** Records that they're answering a question in their own words rather than picking one. */
   function markOther(index: number, picked: boolean) {
     setMessages((prev) =>
@@ -615,8 +652,23 @@ export function Studio({
 
   const [exporting, setExporting] = useState(false);
   const [confirmingNew, setConfirmingNew] = useState(false);
+  /** The write-up currently open, assembled once so its picture can't change under it. */
+  const [spec, setSpec] = useState<SpecDocument | null>(null);
 
-  const hasUnsavedWork = Boolean(design) && saveState !== "saved";
+  /**
+   * Whether there's a model, and whether there's anything at all to save.
+   *
+   * A readme counts on its own. Someone can arrive with a plan and no model — measurements
+   * off the real object, what to try first — and that has to survive closing the tab as
+   * surely as a finished build does.
+   *
+   * A record is a build when it has code and a draft when it doesn't, here and on the
+   * server both — which is why this asks about the code rather than about `design`. Typing
+   * into an empty editor produces a design with nothing in it, and that isn't a model.
+   */
+  const hasModel = Boolean(design?.code.trim());
+  const canSave = hasModel || Boolean(readme.trim());
+  const hasUnsavedWork = canSave && saveState !== "saved";
 
   /**
    * Waiting on an answer they said they'd write themselves.
@@ -664,6 +716,7 @@ export function Studio({
     setSavedId(null);
     setLastPrompt("");
     setPrompt("");
+    setReadme("");
     setAttachment(null);
     setAttachError(null);
     setSaveState("idle");
@@ -719,6 +772,19 @@ export function Studio({
     }
   }
 
+  /**
+   * Assembles the write-up and opens it.
+   *
+   * Everything is captured here rather than read live by the modal — the picture especially.
+   * A spec describes one moment: the model as it was posed, at the size it measured, with
+   * the code that produced it.
+   */
+  async function openSpec() {
+    if (!design) return;
+    const image = (await snapshotRef.current?.()) ?? null;
+    setSpec(buildSpec({ design, size, plateSizeMm, image, readme }));
+  }
+
   async function attachFile(file: File | undefined) {
     if (!file) return;
     setAttachError(null);
@@ -728,14 +794,33 @@ export function Studio({
     else setAttachError(result.error);
   }
 
+  /**
+   * What a draft saves as when there's no design yet.
+   *
+   * The name comes out of the readme's own title, so the library shows what they called it
+   * rather than a row of identical placeholders. Once a model exists the agent's name takes
+   * over, the way it does for any build that was never renamed by hand.
+   */
+  function draftFields() {
+    return {
+      name: readmeTitle(readme) ?? "Untitled draft",
+      code: "",
+      description: "",
+      summary: "",
+      steps: [],
+    };
+  }
+
   async function save() {
-    if (!design) return;
+    if (!canSave) return;
     setSaveState("saving");
+
+    const record = hasModel && design ? design : draftFields();
 
     let response = await fetch("/api/creations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: savedId, prompt: lastPrompt, ...design }),
+      body: JSON.stringify({ id: savedId, prompt: lastPrompt, readme, ...record }),
     });
 
     // The build we were updating has been deleted (here, or in another tab). Save it as a
@@ -745,7 +830,7 @@ export function Studio({
       response = await fetch("/api/creations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: lastPrompt, ...design }),
+        body: JSON.stringify({ prompt: lastPrompt, readme, ...record }),
       });
     }
 
@@ -775,9 +860,12 @@ export function Studio({
           <ViewButton active={view === "code"} onClick={() => setView("code")} Glyph={Code}>
             Code
           </ViewButton>
+          <ViewButton active={view === "readme"} onClick={() => setView("readme")} Glyph={Notebook}>
+            Readme
+          </ViewButton>
         </div>
 
-        {(messages.length > 0 || design) &&
+        {(messages.length > 0 || canSave) &&
           (confirmingNew ? (
             <div className="flex items-center gap-2 text-sm">
               <span className="text-mist-300">Start over?</span>
@@ -813,10 +901,18 @@ export function Studio({
           )}
           <PlateSizePicker plateSizeMm={plateSizeMm} onChange={changePlateSize} />
 
-          {design && (
+          {canSave && (
             <>
               <span aria-hidden className="h-5 w-px bg-ink-700" />
-              <DownloadMenu onDownloadScad={downloadScad} onDownloadStl={downloadStl} busy={exporting} />
+              {/* Nothing to export from a written plan — the downloads are all the model. */}
+              {hasModel && (
+                <DownloadMenu
+                  onDownloadScad={downloadScad}
+                  onDownloadStl={downloadStl}
+                  onOpenSpec={openSpec}
+                  busy={exporting}
+                />
+              )}
               {/*
                 The one filled control in the toolbar, and only while there's work to lose.
                 Once it's saved there is nothing to do here, so it drops back to a quiet
@@ -858,7 +954,7 @@ export function Studio({
         style={{ "--panel-width": `${panelWidth}px` } as React.CSSProperties}
         className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[var(--panel-width)_1fr]"
       >
-        {/* Left panel: conversation, or the code you can edit */}
+        {/* Left panel: the conversation, the code you can edit, or your write-up */}
         <section className="relative flex min-h-0 flex-col border-ink-700 bg-ink-850 lg:border-r">
           {view === "code" ? (
             <div className="flex min-h-0 flex-1 flex-col pt-3">
@@ -869,6 +965,10 @@ export function Studio({
                 error={renderError}
                 incomplete={incomplete}
               />
+            </div>
+          ) : view === "readme" ? (
+            <div className="flex min-h-0 flex-1 flex-col pt-3">
+              <ReadmeEditor readme={readme} onChange={editReadme} />
             </div>
           ) : (
             <>
@@ -1021,7 +1121,12 @@ export function Studio({
 
         {/* Preview */}
         <section className="relative flex min-h-0 flex-col bg-ink-900">
-          <ModelViewer src={modelUrl} spinning={isRendering} captureRef={captureMarkupRef} />
+          <ModelViewer
+            src={modelUrl}
+            spinning={isRendering}
+            captureRef={captureMarkupRef}
+            snapshotRef={snapshotRef}
+          />
 
           {isRendering && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -1047,6 +1152,8 @@ export function Studio({
           )}
         </section>
       </main>
+
+      {spec && <SpecDocumentModal spec={spec} onClose={() => setSpec(null)} />}
     </div>
   );
 }
