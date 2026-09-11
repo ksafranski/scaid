@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "eslint",
     "db:stop": "docker stop scaid-mongo",
-    "db:logs": "docker logs -f scaid-mongo"
+    "db:logs": "docker logs -f scaid-mongo",
+    "verify:patterns": "tsx scripts/verify-patterns.mjs",
+    "ab:patterns": "tsx scripts/ab-patterns.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
@@ -34,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

@@ -86,6 +86,43 @@ The agent is constrained to return a structured response — a fun name, a warm 
 build steps that each explain *why* a shape was chosen, and the OpenSCAD program itself. The steps
 are the point: they're what turns a black box into something a young maker learns from.
 
+### The pattern library
+
+A language model is good at deciding *what* to build and unreliable at working out *how* when the
+geometry is genuinely hard. Asked for a threaded lid it writes something thread-shaped and
+confidently wrong — in testing, 96% short by volume, and it renders and exports without complaint.
+
+So `src/lib/scadPatterns/` holds 23 worked techniques in plain OpenSCAD: rounded boxes, fillets,
+teardrop holes, ISO clearances, screw holes, snap fits, print-in-place hinges, real ISO threads,
+involute gears, bearing seats, sweeps, lofts, honeycombs. The agent adapts them instead of
+deriving them.
+
+**Every one is graded against [BOSL2](https://github.com/BelfrySCAD/BOSL2) before it ships.**
+`npm run verify:patterns` renders each pattern in the same WebAssembly OpenSCAD the browser uses,
+renders BOSL2's version of the same solid, and compares volume and outside dimensions — two
+programs describing the same object agree on both, however differently they're written. The thread
+that was 96% wrong improvised is 1.3% off worked and verified, and renders 2.7× faster than BOSL2's.
+
+BOSL2 is a *reference, never a dependency*. It is not bundled, not served, and never appears in
+generated code: a Scaid model is downloaded and opened in someone's own OpenSCAD with nothing
+installed beside it, so every program has to stand on its own. The verifier fetches BOSL2 into a
+gitignored `.bosl2-cache/`, pinned to a commit.
+
+Patterns reach the agent in two tiers, with no extra round trip. A one-line index of all 23 rides
+in the cached system prompt (~720 tokens); the full body of the handful whose triggers match the
+request is appended after the cache breakpoint (~0-2.6k tokens). Keyword matching rather than a
+retrieval call, because `/api/design` is one streaming structured-output request and needs to stay
+that way — the studio reports progress from the fields as they arrive.
+
+`npm run ab:patterns "a jar with a lid that screws on"` asks the real agent the same thing with and
+without the library and renders both answers, for checking the claim rather than arguing it.
+
+| Command | What it does |
+| --- | --- |
+| `npm run verify:patterns` | Grade every technique in the pattern library against BOSL2. |
+| `npm run verify:patterns thread` | Grade just the patterns whose id matches. |
+| `npm run ab:patterns "..."` | Ask the real agent the same thing with and without the library. |
+
 Rendering happens entirely in the browser. OpenSCAD is compiled to WebAssembly and runs in a Web
 Worker (so the interface never freezes), using the `manifold` backend and exporting `OFF` — which,
 unlike STL, carries per-face colour. `src/lib/scadColors.ts` then keeps only the colours the program
@@ -96,6 +133,9 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | Path | What's there |
 | --- | --- |
 | `src/app/api/design` | The design agent |
+| `src/lib/scadPatterns/` | The verified OpenSCAD technique library and its prompt injection |
+| `scripts/verify-patterns.mjs` | Grades every pattern against BOSL2 — `npm run verify:patterns` |
+| `scripts/lib/scad-render.mjs` | Renders and measures OpenSCAD in Node, using the browser's own wasm |
 | `src/app/api/auth`, `src/lib/auth.ts` | Email + password accounts, signed cookie sessions |
 | `src/app/api/creations` | Saving, listing and deleting creations |
 | `src/hooks/useScadRenderer.ts` | Drives the render worker, drops stale renders |
@@ -131,6 +171,14 @@ Note that `public/scad/openscad.wasm` is ~9.6 MB. It's fetched once and then cac
 but make sure your host serves it with compression and long-lived cache headers.
 
 ## Licence note
+
+[BOSL2](https://github.com/BelfrySCAD/BOSL2) is BSD-2-Clause, © 2017-2019 Revar Desmera. It is used
+here as a build-time reference — the `npm run verify:patterns` harness grades our own hand-written
+OpenSCAD against it. No BOSL2 code is bundled, served, or emitted into a generated model, and the
+checkout lives in a gitignored cache. The techniques in `src/lib/scadPatterns/` are written from
+scratch and verified against BOSL2's output; where one follows BOSL2's approach closely, the
+standard it implements (ISO 68-1 threads, ISO 273 clearance holes, involute tooth profiles) is
+named in the code.
 
 OpenSCAD is GPL-2.0. The WebAssembly build in `public/scad/` is shipped unmodified and served to the
 browser as a separate file; if you distribute this app publicly, make its corresponding source

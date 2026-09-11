@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# BOSL2, fetched for pattern verification. Reference only — never shipped.
+/.bosl2-cache
+
+# A/B output from npm run ab:patterns
+/.ab-*.scad

@@ -8,6 +8,7 @@ import { ICON_NAMES } from "@/lib/iconNames";
 import { encodeEvent, type AgentEvent } from "@/lib/agentEvents";
 import { StreamedFields } from "@/lib/partialJson";
 import { findAdvice, findProblems } from "@/lib/scadLint";
+import { PATTERN_INDEX, patternBrief } from "@/lib/scadPatterns/prompt";
 
 // 300s is the platform maximum on Hobby and the default everywhere. Real requests land
 // at 30-50s; the headroom is for a complex model, not an expectation.
@@ -279,13 +280,23 @@ These are not interchangeable, and mixing them up is the most common mistake her
 
 ## Rules for the code
 - Use ONLY built-in OpenSCAD features. No include<>, no use<>, no external libraries — they are not
-  installed and will fail.
+  installed and will fail. This holds even when a worked technique is handed to you below: paste
+  what you need into the program so it stands on its own. Someone downloads this file and opens it
+  in their own OpenSCAD, where nothing is installed beside it.
 - **No text().** This build ships no fonts, so any lettering fails with "Can't get font" and there is
   nothing they can do about it. Never write it, and never offer letters, names or numbers as a
   direction — carve a recognizable shape instead.
 - Sizes are millimeters. Keep the whole model roughly 20-150mm so it fits nicely on screen.
 - Build the model sitting on the ground plane (z = 0) and centered around x = 0, y = 0.
 - Set $fn between 32 and 64 near the top. Higher is slower and the preview will crawl.
+- **$fn is paid once per shape, so a form built from many copies pays it every time.** When you
+  repeat or hull a sphere or cylinder more than about twenty times — a sweep along a path, a coil,
+  a spiral, a row of ribs or grooves — give that primitive its own low $fn inside the call
+  ($fn = 12 to 24 is plenty), instead of letting it inherit the one at the top. How smooth a swept
+  shape looks comes from how many steps you take ALONG the path, not from how round each step is,
+  so this changes nothing anyone can see. It is the difference between a model that appears in
+  three seconds and the same model taking twenty-five, which is the most common reason a build
+  feels broken.
 - The result must be one solid, watertight shape suitable for 3D printing. Avoid zero-thickness walls
   and faces that exactly touch — overlap parts slightly (0.01mm) so they truly fuse.
 - Use color() when it helps them read the separate parts. It shows up in the preview.
@@ -313,7 +324,9 @@ several parts, say so and change the one the words point at.
 ## When they attach a picture
 The picture is what they want to make. Look at its overall shape and build a simplified 3D version out
 of basic solids. Don't chase fine detail or texture; clean and chunky prints better and reads better.
-Say what you spotted and what you simplified, so they know you looked.`;
+Say what you spotted and what you simplified, so they know you looked.
+
+${PATTERN_INDEX}`;
 
 /**
  * The repair pass.
@@ -645,6 +658,9 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
     { role: "user" as const, content },
   ];
 
+  const patterns = patternBrief({ prompt, currentCode });
+  if (patterns.ids.length) console.log(`[design] patterns: ${patterns.ids.join(", ")}`);
+
   send({ t: "stage", stage: "thinking" });
 
   const fields = new StreamedFields();
@@ -668,7 +684,12 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
     // means we pay full price for it roughly once per five minutes instead of every time.
     // Placed explicitly rather than via top-level cache_control, which would land the
     // breakpoint on the (always different) user turn and never hit.
-    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+    system: [
+      { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
+      // Chosen from this turn's request, so it must sit after the breakpoint above or the
+      // cached prefix would change on every call and never hit.
+      ...(patterns.text ? [{ type: "text" as const, text: patterns.text }] : []),
+    ],
     messages,
     // Effort is the supported way to trade thinking depth against time; budget_tokens is
     // rejected outright on this model. Default is "high", which was spending three quarters
