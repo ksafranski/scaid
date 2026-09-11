@@ -30,8 +30,8 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
   plan, the measurements you took, what to try next. It's yours, so the agent never rewrites it,
   and a readme saves on its own — you can keep a plan in your library before there's a model.
 - **Print it** — set your build plate size (remembered on your account), see the model's real
-  dimensions with a warning when it won't fit, and download STL for your slicer or SCAD for
-  OpenSCAD.
+  dimensions with a warning when it won't fit, and download 3MF or STL for your slicer, or SCAD
+  for OpenSCAD.
 - **Write it up** — open the spec document for your readme, the picture, the measurements, the
   reasoning and the code as one page. Copy it straight into a Google Doc, or save it as Markdown
   with the picture alongside.
@@ -169,6 +169,26 @@ these as expressions, so a value carrying a semicolon would be a second statemen
 isn't a number at all becomes `undef` and renders a silently wrong shape rather than an error.
 Both are refused before they reach the program.
 
+### 3MF
+
+STL is a list of loose triangles with no units and no colour: a slicer opening one guesses the
+file is in millimetres — usually right, and "usually" is doing work there — and a model coloured
+to show its parts arrives grey.
+
+`src/lib/export3mf.ts` writes 3MF instead, which carries both. It has to be written here, because
+the WebAssembly OpenSCAD this app ships cannot produce one: `--export-format=3mf` is accepted,
+renders without complaint, and writes a **zero-byte file**, lib3mf having been left out of the
+build. That turns out better anyway — it's written from the same mesh the viewer is showing, so
+what lands on disk is what was on screen rather than the result of compiling the program again.
+
+A 3MF is an OPC package, which is a ZIP of three files, and `src/lib/zip.ts` already writes a
+stored-entry ZIP. A model nobody coloured is sent without a colour rather than with the grey the
+viewer paints it, because writing that in would tell a slicer to print it grey over whatever was
+actually loaded.
+
+The checks read the file back rather than trusting it: unpack the archive, parse the model, and
+measure the solid that comes out against the one that went in.
+
 ### The ruler landing where you meant
 
 A ray hits wherever it hits, so a click a couple of pixels off a corner is a couple of
@@ -295,7 +315,7 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/components/CodeEditor.tsx` | Live editor: highlighted layer under a transparent textarea |
 | `src/hooks/usePanelWidth.ts` | Draggable panel width, remembered per browser |
 | `src/lib/studioSession.ts` | Keeps unsaved work alive across navigation and reloads |
-| `src/lib/exportStl.ts`, `src/components/PrintControls.tsx` | STL/SCAD download, plate size, fit check |
+| `src/lib/exportStl.ts`, `src/lib/export3mf.ts`, `src/components/PrintControls.tsx` | 3MF/STL/SCAD download, plate size, fit check |
 | `src/components/ReadmeEditor.tsx` | The project readme: a Markdown editor with a preview |
 | `src/lib/markdown.ts`, `src/components/Markdown.tsx` | Small Markdown reader, and the same AST drawn as React |
 | `src/lib/specDocument.ts`, `src/components/SpecDocumentModal.tsx` | The spec document, and its Markdown, HTML and plain-text renderings |

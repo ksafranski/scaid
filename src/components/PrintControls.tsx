@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowsClockwise,
   Blueprint,
+  Cube,
   CaretDown,
   CodeBlock,
   DownloadSimple,
@@ -263,12 +264,14 @@ export function ModelFacts({
 export function DownloadMenu({
   onDownloadScad,
   onDownloadStl,
+  onDownload3mf,
   onOpenSpec,
   busy,
   sectioned,
 }: {
   onDownloadScad: () => void;
   onDownloadStl: () => void;
+  onDownload3mf: () => void;
   onOpenSpec: () => void;
   busy: boolean;
   /**
@@ -320,10 +323,21 @@ export function DownloadMenu({
           role="menu"
           className="absolute right-0 z-30 mt-1.5 w-64 overflow-hidden rounded-xl border border-ink-700 bg-ink-850 shadow-2xl"
         >
+          {/* First, because it's the better file: STL has no units and no colour, and
+              stays above it only because plenty of workflows still expect one. */}
+          <MenuItem
+            Glyph={Cube}
+            title="3MF"
+            detail="For your slicer — keeps the colours and the millimeters"
+            onClick={() => {
+              setOpen(false);
+              onDownload3mf();
+            }}
+          />
           <MenuItem
             Glyph={Blueprint}
             title="STL"
-            detail="For your slicer — Cura, PrusaSlicer, Bambu Studio"
+            detail="The older format, if something you use wants one"
             onClick={() => {
               setOpen(false);
               onDownloadStl();

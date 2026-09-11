@@ -48,6 +48,7 @@ import { factProblem, toMeasured } from "@/lib/geometry/facts";
 import { Dials } from "./Dials";
 import { parseParameters, setParameter } from "@/lib/scadParameters";
 import { turnSource } from "@/lib/geometry/orientation";
+import { export3mf } from "@/lib/export3mf";
 import {
   checkExpectations,
   describeMisses,
@@ -215,7 +216,7 @@ export function Studio({
     measuredCode,
     section,
     advice,
-    snapTargets,
+    mesh,
     render,
     reset,
     setSection,
@@ -692,6 +693,13 @@ export function Studio({
    */
   const parameters = useMemo(() => parseParameters(design?.code ?? ""), [design?.code]);
 
+  // Held steady so the viewer isn't handed a new object on every render for a value that
+  // only changes when the model does.
+  const snapTargets = useMemo(
+    () => (mesh && metrics && !metrics.empty ? { vertices: mesh.vertices, lowestZ: metrics.lowestZ } : null),
+    [mesh, metrics],
+  );
+
   // A rebuild can take the controls away while their panel is open. Working out which
   // panel to show, rather than correcting the stored one afterwards, means there's never
   // a frame where the dials tab is selected and empty.
@@ -903,6 +911,17 @@ export function Studio({
     );
   }
 
+  /**
+   * Saves the model as 3MF.
+   *
+   * Built from the mesh on screen rather than from another compile: what lands on disk is
+   * the thing they were looking at, colours and all, and it arrives immediately.
+   */
+  function download3mf() {
+    if (!design || !mesh) return;
+    downloadBlob(export3mf(mesh, design.name), toFileName(design.name, "3mf"));
+  }
+
   async function downloadStl() {
     if (!design || exporting) return;
     setExporting(true);
@@ -1076,6 +1095,7 @@ export function Studio({
                 <DownloadMenu
                   onDownloadScad={downloadScad}
                   onDownloadStl={downloadStl}
+                  onDownload3mf={download3mf}
                   onOpenSpec={openSpec}
                   busy={exporting}
                   sectioned={Boolean(section)}

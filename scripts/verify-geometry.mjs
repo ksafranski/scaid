@@ -28,6 +28,7 @@ const { checkExpectations, misses, describeMisses, MEASURABLES } = await import(
   "../src/lib/geometry/expectations.ts"
 );
 const { snapTo } = await import("../src/lib/measure.ts");
+const { export3mf } = await import("../src/lib/export3mf.ts");
 
 const filter = process.argv[2];
 
@@ -731,6 +732,131 @@ const SNAPPING = [
   }),
 ];
 
+/**
+ * The 3MF the download hands over.
+ *
+ * A file format is only correct if what reads it agrees, so these read it back: unpack the
+ * archive, parse the model out of it, and check that the solid described is the same solid
+ * that went in — by measuring it, not by trusting the numbers were copied across.
+ */
+const THREE_MF = [
+  check("3mf › the package holds the three files that make it one", async () => {
+    const { off } = await render("cube(20);", { includeOff: true });
+    const files = await unzipStored(await blobBytes(export3mf(parseOff(off), "A cube")));
+    for (const name of ["[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"]) {
+      if (!files.has(name)) throw new Error(`the archive has no ${name}`);
+    }
+    is([...files.keys()][0], "[Content_Types].xml", "what comes first");
+    if (!files.get("_rels/.rels").includes("/3D/3dmodel.model")) {
+      throw new Error("the package doesn't point at its own model");
+    }
+  }),
+
+  check("3mf › it says what unit it is in, which is the whole point over STL", async () => {
+    const { off } = await render("cube(20);", { includeOff: true });
+    const files = await unzipStored(await blobBytes(export3mf(parseOff(off), "A cube")));
+    const model = files.get("3D/3dmodel.model");
+    if (!model.includes('unit="millimeter"')) throw new Error("no unit, so a slicer has to guess");
+    if (!model.includes("<build>")) throw new Error("nothing is actually built from the object");
+  }),
+
+  check("3mf › the solid that comes back out measures the same as the one that went in", async () => {
+    // The check that can't be faked by copying numbers around: parse the file back and
+    // work out its volume from its own vertices and triangles.
+    const program = "$fn = 32; difference() { cylinder(h = 30, r = 12); translate([0,0,-1]) cylinder(h = 32, r = 8); }";
+    const { off } = await render(program, { includeOff: true });
+    const mesh = parseOff(off);
+    const before = inspectMesh(mesh);
+
+    const files = await unzipStored(await blobBytes(export3mf(mesh, "A tube")));
+    const after = inspectMesh(readModelMesh(files.get("3D/3dmodel.model")));
+
+    is(after.triangles, before.triangles, "triangles");
+    near(after.volume, before.volume, relative(before.volume), "volume");
+    near(after.size.x, before.size.x, 1e-4, "width");
+    near(after.size.z, before.size.z, 1e-4, "height");
+    is(after.watertight.ok, true, "still closed after the round trip");
+  }),
+
+  check("3mf › colours the program asked for survive", async () => {
+    const { off } = await render(
+      'color("red") cube(10); color("blue") translate([12,0,0]) cube(10);',
+      { includeOff: true },
+    );
+    // parseOff keeps only what the program asked for, which is what the viewer shows.
+    const mesh = parseOff(off, [[1, 0, 0, 1], [0, 0, 1, 1]]);
+    const model = (await unzipStored(await blobBytes(export3mf(mesh, "Two cubes")))).get("3D/3dmodel.model");
+
+    if (!model.includes("colorgroup")) throw new Error("the colours were dropped");
+    if (!/#FF0000/i.test(model)) throw new Error("no red");
+    if (!/#0000FF/i.test(model)) throw new Error("no blue");
+    if (!/<triangle [^>]*p1="/.test(model)) throw new Error("nothing says which triangle is which colour");
+  }),
+
+  check("3mf › a model nobody coloured is sent without a colour", async () => {
+    // Grey is what the viewer paints an uncoloured model. Writing that into the file would
+    // tell a slicer to print it grey, over whatever they actually loaded.
+    const { off } = await render("cube(20);", { includeOff: true });
+    const model = (await unzipStored(await blobBytes(export3mf(parseOff(off), "A cube")))).get("3D/3dmodel.model");
+    if (model.includes("colorgroup")) throw new Error("an uncoloured model was given a colour anyway");
+  }),
+
+  check("3mf › a name with characters XML minds doesn't break the file", async () => {
+    const { off } = await render("cube(10);", { includeOff: true });
+    const model = (await unzipStored(await blobBytes(export3mf(parseOff(off), 'Bob & "Ann" <3'))))
+      .get("3D/3dmodel.model");
+    if (model.includes('Bob & "Ann" <3')) throw new Error("the name went in raw and broke the XML");
+    if (!model.includes("Bob &amp;")) throw new Error("the name didn't survive at all");
+  }),
+];
+
+/** Blob to bytes, without the browser's conveniences. */
+async function blobBytes(blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/**
+ * Unpacks a stored-entry ZIP.
+ *
+ * Only has to handle the archives this app writes, which never compress — so an entry is
+ * its bytes, sitting straight after its header.
+ */
+async function unzipStored(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  const files = new Map();
+
+  let at = 0;
+  while (at + 30 <= bytes.length && view.getUint32(at, true) === 0x04034b50) {
+    const method = view.getUint16(at + 8, true);
+    const size = view.getUint32(at + 18, true);
+    const nameLength = view.getUint16(at + 26, true);
+    const extraLength = view.getUint16(at + 28, true);
+    const name = decoder.decode(bytes.subarray(at + 30, at + 30 + nameLength));
+    if (method !== 0) throw new Error(`${name} is compressed, which this writer never does`);
+    const start = at + 30 + nameLength + extraLength;
+    files.set(name, decoder.decode(bytes.subarray(start, start + size)));
+    at = start + size;
+  }
+
+  if (!files.size) throw new Error("nothing could be unpacked, so it isn't a ZIP");
+  return files;
+}
+
+/** Reads the mesh back out of a 3MF model document, so it can be measured again. */
+function readModelMesh(xml) {
+  const vertices = [...xml.matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"/g)].map((m) => ({
+    x: Number(m[1]),
+    y: Number(m[2]),
+    z: Number(m[3]),
+  }));
+  const faces = [...xml.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g)].map((m) => ({
+    vertices: [Number(m[1]), Number(m[2]), Number(m[3])],
+    colorIndex: 0,
+  }));
+  return { vertices, faces, colors: [] };
+}
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -776,7 +902,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF]) {
   if (!item) continue;
   const started = Date.now();
   try {
