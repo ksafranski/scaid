@@ -33,6 +33,7 @@ const { record, measured, describeChange, ago, MAX_VERSIONS, HAND_EDIT } = await
   "../src/lib/versions.ts"
 );
 const { toMeasured } = await import("../src/lib/geometry/facts.ts");
+const { requestedColors } = await import("../src/lib/scadColors.ts");
 
 const filter = process.argv[2];
 
@@ -966,6 +967,44 @@ const VERSIONS = [
   }),
 ];
 
+/**
+ * Which colours a program asked for.
+ *
+ * The importer flattens every colour it wasn't told to expect, so a request that goes
+ * unrecognised here doesn't come out wrong — it comes out grey, which reads as the colour
+ * having been ignored. Only the reading is checked, not the resolving: turning "steelblue"
+ * into numbers needs a canvas, and this runs where there isn't one.
+ */
+const COLOURS = [
+  check("colour › asked for by name, which is how a dial asks", () => {
+    // The reported failure. A colour kept at the top as a setting, used below by name —
+    // the shape the studio asks the agent to write, so it is the common one.
+    const named = requestedColors('shade = "blue";\ncolor(shade) cube(10);');
+    is(named.length, 1, "how many found");
+    is(named[0].css, "blue", "which colour");
+
+    const annotated = requestedColors(
+      '/* [Look] */\n// Preview color\nshade = "blue";  // [blue, red, green]\ncolor(shade) cube(10);',
+    );
+    is(annotated[0]?.css, "blue", "a dial's annotation doesn't hide it");
+  }),
+
+  check("colour › asked for where it's used, as before", () => {
+    is(requestedColors('color("blue") cube(10);')[0]?.css, "blue", "a literal");
+    is(JSON.stringify(requestedColors("color([0.2, 0.4, 1]) cube(10);")[0]?.rgb), "[0.2,0.4,1]", "a vector");
+    is(JSON.stringify(requestedColors("tint = [0.2, 0.4, 1];\ncolor(tint) cube(10);")[0]?.rgb), "[0.2,0.4,1]", "a named vector");
+    is(requestedColors('shade = "red";\ncolor(shade, 0.5) cube(10);')[0]?.css, "red", "with an alpha alongside");
+  }),
+
+  check("colour › a string is not a colour request just for existing", () => {
+    // Only names something actually colours with are resolved. A setting holding "gold"
+    // for some other purpose would otherwise let one of OpenSCAD's own defaults through.
+    is(requestedColors('style = "round";\nfinish = "gold";\ncube(10);').length, 0, "unused strings");
+    is(requestedColors('// color("blue")\ncube(10);').length, 0, "a call in a comment");
+    is(requestedColors('label = "color(\\"blue\\")";\ncube(10);').length, 0, "a call inside a string");
+  }),
+];
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -1011,7 +1050,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS, ...COLOURS]) {
   if (!item) continue;
   const started = Date.now();
   try {

@@ -48,22 +48,138 @@ function cssToRgb(value: string): [number, number, number] | null {
   return null;
 }
 
-/** Every color explicitly requested by color(...) calls in an OpenSCAD program. */
+/**
+ * A colour as the program wrote it, before any of it means anything.
+ *
+ * Split out from resolving it so the reading can be checked away from a browser: turning
+ * "steelblue" into numbers needs a canvas, and working out that the program asked for
+ * steelblue at all does not.
+ */
+export interface RequestedColor {
+  /** A CSS name or hex, as written. */
+  css?: string;
+  /** Components in 0..1, when the program gave a vector. */
+  rgb?: [number, number, number];
+}
+
+/** Comments gone, strings intact — a colour lives inside a string and must survive. */
+function stripComments(code: string): string {
+  let out = "";
+  let inString = false;
+
+  for (let i = 0; i < code.length; i++) {
+    const here = code[i];
+    const next = code[i + 1];
+
+    if (inString) {
+      out += here;
+      if (here === "\\") {
+        out += next ?? "";
+        i++;
+      } else if (here === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (here === '"') {
+      inString = true;
+      out += here;
+      continue;
+    }
+
+    if (here === "/" && next === "/") {
+      while (i < code.length && code[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+
+    if (here === "/" && next === "*") {
+      i += 2;
+      while (i < code.length && !(code[i] === "*" && code[i + 1] === "/")) i++;
+      i++;
+      out += " ";
+      continue;
+    }
+
+    out += here;
+  }
+
+  return out;
+}
+
+function readLiteral(literal: string): RequestedColor | null {
+  const text = literal.trim();
+
+  if (text.startsWith('"')) {
+    const value = text.slice(1, -1).trim();
+    return value ? { css: value } : null;
+  }
+
+  if (text.startsWith("[")) {
+    const parts = text.slice(1, -1).split(",").map((part) => parseFloat(part.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((part) => !isNaN(part))) {
+      return { rgb: [parts[0], parts[1], parts[2]] };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Every colour a program asks for, including the ones it asks for by name.
+ *
+ * Reading only `color("blue")` was enough until programs started keeping their settings at
+ * the top, where a colour is a named value and the call site says `color(shade)`. That is
+ * the shape the studio now asks the agent to write, so it became the common one — and a
+ * colour that isn't recognised here is flattened to grey by the importer, which made
+ * choosing a colour look broken.
+ *
+ * So a name passed to `color()` is looked up among the program's own assignments. Only
+ * names actually used that way are resolved: a setting called `finish` holding "gold" is
+ * not a colour request unless something colours with it.
+ */
+export function requestedColors(code: string): RequestedColor[] {
+  const source = stripComments(code);
+  const found: RequestedColor[] = [];
+
+  const LITERAL = String.raw`"(?:[^"\\]|\\.)*"|\[[^\]]*\]`;
+
+  // color("red") and color([r, g, b]) — written where they're used.
+  for (const match of source.matchAll(new RegExp(String.raw`\bcolor\s*\(\s*(${LITERAL})`, "g"))) {
+    const colour = readLiteral(match[1]);
+    if (colour) found.push(colour);
+  }
+
+  // color(shade), where the program said what shade is somewhere above.
+  const named = new Map<string, string>();
+  for (const match of source.matchAll(
+    new RegExp(String.raw`(^|[;{}\n])\s*([A-Za-z_]\w*)\s*=\s*(${LITERAL})\s*;`, "gm"),
+  )) {
+    // First assignment wins, the way reading down the file suggests.
+    if (!named.has(match[2])) named.set(match[2], match[3]);
+  }
+
+  for (const match of source.matchAll(/\bcolor\s*\(\s*([A-Za-z_]\w*)\s*[,)]/g)) {
+    const literal = named.get(match[1]);
+    const colour = literal ? readLiteral(literal) : null;
+    if (colour) found.push(colour);
+  }
+
+  return found;
+}
+
+/** Every color explicitly requested by color(...) calls, resolved to numbers. */
 export function extractRequestedColors(code: string): Color[] {
   const found: Color[] = [];
 
-  // color("red") / color("#ff8800")
-  for (const match of code.matchAll(/\bcolor\s*\(\s*"([^"]+)"/g)) {
-    const rgb = cssToRgb(match[1].trim());
-    if (rgb) found.push([...rgb, 1]);
-  }
-
-  // color([r, g, b]) with components in 0..1
-  for (const match of code.matchAll(/\bcolor\s*\(\s*\[([^\]]+)\]/g)) {
-    const parts = match[1].split(",").map((part) => parseFloat(part.trim()));
-    if (parts.length >= 3 && parts.slice(0, 3).every((part) => !isNaN(part))) {
-      found.push([parts[0], parts[1], parts[2], 1]);
+  for (const requested of requestedColors(code)) {
+    if (requested.rgb) {
+      found.push([...requested.rgb, 1]);
+      continue;
     }
+    const rgb = requested.css ? cssToRgb(requested.css) : null;
+    if (rgb) found.push([...rgb, 1]);
   }
 
   return found;
