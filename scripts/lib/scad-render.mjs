@@ -63,27 +63,36 @@ function measure(off) {
     vertices.push(lines[cursor++].split(/\s+/).slice(0, 3).map(Number));
   }
 
-  let volume = 0;
-  for (let i = 0; i < faceCount; i++) {
-    // A face line is "n i0 i1 ... [r g b a]", so only the first n + 1 numbers are indices.
-    const parts = lines[cursor++].split(/\s+/).map(Number);
-    const face = parts.slice(1, 1 + parts[0]);
-    for (let j = 1; j < face.length - 1; j++) {
-      const [a, b, c] = [vertices[face[0]], vertices[face[j]], vertices[face[j + 1]]];
-      volume +=
-        (a[0] * (b[1] * c[2] - c[1] * b[2]) -
-          a[1] * (b[0] * c[2] - c[0] * b[2]) +
-          a[2] * (b[0] * c[1] - c[0] * b[1])) /
-        6;
-    }
-  }
-
   const low = [Infinity, Infinity, Infinity];
   const high = [-Infinity, -Infinity, -Infinity];
   for (const vertex of vertices) {
     for (let axis = 0; axis < 3; axis++) {
       if (vertex[axis] < low[axis]) low[axis] = vertex[axis];
       if (vertex[axis] > high[axis]) high[axis] = vertex[axis];
+    }
+  }
+
+  // Every term below is a product of three coordinates, so summing tetrahedra from the
+  // world origin makes each one as large as the model's distance from origin rather than
+  // as large as the model. The total is the same in exact arithmetic and not in floating
+  // point, so a part modeled far from center would lose volume to cancellation. Measuring
+  // from the middle of the model keeps the terms the size of the thing being measured.
+  const origin = low.map((value, axis) => (value + high[axis]) / 2);
+
+  let volume = 0;
+  for (let i = 0; i < faceCount; i++) {
+    // A face line is "n i0 i1 ... [r g b a]", so only the first n + 1 numbers are indices.
+    const parts = lines[cursor++].split(/\s+/).map(Number);
+    const face = parts.slice(1, 1 + parts[0]);
+    for (let j = 1; j < face.length - 1; j++) {
+      const [a, b, c] = [vertices[face[0]], vertices[face[j]], vertices[face[j + 1]]].map(
+        (vertex) => vertex.map((value, axis) => value - origin[axis]),
+      );
+      volume +=
+        (a[0] * (b[1] * c[2] - c[1] * b[2]) -
+          a[1] * (b[0] * c[2] - c[0] * b[2]) +
+          a[2] * (b[0] * c[1] - c[0] * b[1])) /
+        6;
     }
   }
 
@@ -98,9 +107,11 @@ function measure(off) {
  * Compiles a program and measures the solid it produced.
  *
  * @param {string} source OpenSCAD program.
- * @param {{ libraries?: string }} [options] Host directory to mount at /libraries, for
- *   reference programs that lean on BOSL2. Pattern code never gets one — that's the point.
- * @returns {Promise<{ volume: number, size: number[], vertices: number, ms: number } | { error: string }>}
+ * @param {{ libraries?: string, includeOff?: boolean }} [options] `libraries` is a host
+ *   directory to mount at /libraries, for reference programs that lean on BOSL2 — pattern
+ *   code never gets one, that's the point. `includeOff` returns the raw mesh alongside the
+ *   measurements, for a checker that wants to parse it the way the browser does.
+ * @returns {Promise<{ volume: number, size: number[], vertices: number, ms: number, off?: string } | { error: string }>}
  */
 export async function render(source, options = {}) {
   const stderr = [];
@@ -110,6 +121,8 @@ export async function render(source, options = {}) {
     print: () => {},
     printErr: (line) => {
       if (line.includes("Manifold constructor") || line.includes("Manifold: ")) return;
+      // Printed on every run, whatever happens, and never once useful.
+      if (line.includes('Could not initialize localization')) return;
       stderr.push(line);
     },
   });
@@ -145,5 +158,10 @@ export async function render(source, options = {}) {
     return { error: "The program compiled but produced no geometry." };
   }
 
-  return { ...measure(off), ms, warnings: stderr.filter((line) => line.includes("WARNING:")) };
+  return {
+    ...measure(off),
+    ms,
+    warnings: stderr.filter((line) => line.includes("WARNING:")),
+    ...(options.includeOff ? { off } : {}),
+  };
 }

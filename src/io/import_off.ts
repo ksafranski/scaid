@@ -24,12 +24,15 @@ export function parseOff(content: string, requestedColors: Color[] = []): Indexe
   
   if (lines.length === 0) throw new Error('Empty OFF file');
 
+  // The header is either "OFF 8 6 0" on one line, or "OFF" with the counts on the next.
+  // Test for the counts being present before assuming they're on the header line, or a
+  // bare "OFF" reads its counts out of an empty string and every one of them is NaN.
   let counts: string;
   let currentLine = 0;
-  if (lines[0].match(/^OFF(\s|$)/)) {
+  if (lines[0].match(/^OFF\s+\S/)) {
     counts = lines[0].substring(3).trim();
     currentLine = 1;
-  } else if (lines[currentLine] === 'OFF' && lines.length > 1) {
+  } else if (lines[0] === 'OFF' && lines.length > 1) {
     counts = lines[1];
     currentLine = 2;
   } else {

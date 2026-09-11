@@ -10,6 +10,8 @@ import { normalizeText } from "./emoji";
 import { markdownToHtml, markdownToPlainText, parseMarkdown } from "./markdown";
 import type { BuildStep } from "./types";
 import type { ModelSize } from "@/hooks/useScadRenderer";
+import { factRows } from "@/lib/geometry/facts";
+import type { GeometryReport } from "@/lib/geometry/inspect";
 
 const MM_PER_INCH = 25.4;
 
@@ -56,12 +58,14 @@ function span(value: number): string {
 export function buildSpec({
   design,
   size,
+  metrics,
   plateSizeMm,
   image,
   readme,
 }: {
   design: SpecSource;
   size: ModelSize | null;
+  metrics: GeometryReport | null;
   plateSizeMm: number;
   image: string | null;
   readme: string;
@@ -86,6 +90,9 @@ export function buildSpec({
           },
         ]
       : []),
+    // The rest of what the mesh was measured for. Already in the shape this list wants,
+    // so the three renderings below pick them up without knowing anything new.
+    ...(metrics ? factRows(metrics) : []),
   ];
 
   return {

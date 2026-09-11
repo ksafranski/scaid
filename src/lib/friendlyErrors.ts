@@ -25,6 +25,14 @@ const PATTERNS: Array<{ test: RegExp; message: string }> = [
       "Some pieces are only just touching, so the shape isn't solid. Ask me to make the parts overlap a bit more!",
   },
   {
+    // OpenSCAD writes no output file at all in this case, so it arrives as a failed read
+    // rather than as an error — which is why it needs saying plainly. Usually a condition
+    // that was never true, or a difference() that removed everything.
+    test: /top level object is empty/i,
+    message:
+      "That built an empty space — there's no shape there to show. Ask me to check what went missing!",
+  },
+  {
     test: /out of memory|Allocation failed/i,
     message: "That shape got too big for me to build. Ask me to make it simpler or smaller!",
   },

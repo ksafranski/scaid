@@ -22,6 +22,8 @@ self.onmessage = async (e) => {
       printErr: (text) => {
         // Manifold chatters on stderr during normal operation; not useful to anyone.
         if (text.includes('Manifold constructor') || text.includes('Manifold: ')) return;
+        // Printed on every run, whatever happens, and never once useful.
+        if (text.includes('Could not initialize localization')) return;
         stderr.push(text);
       },
     });

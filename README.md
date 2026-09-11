@@ -9,8 +9,14 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
 - **Measure it** — the ruler in the viewer reads off the build plate: click a spot for its
   position, or drag between two for the distance, the gap on each axis and the angle off the
   plate. Readings stay on the model while you turn it.
+- **Cut it open** — slice the model across X, Y or Z and slide the cut through it. The ruler
+  still works on the exposed face, so measuring a wall's thickness is one drag.
+- **Know what it weighs** — click the size in the toolbar for what the model actually measures:
+  volume, weight and filament if it were printed solid, how much of it overhangs, what it
+  stands on, and whether it balances. Taken off the mesh, so the numbers are checkable.
 - **Understand it** — every build comes with a step-by-step breakdown and the reasoning behind each
-  choice.
+  choice. The agent is told what its last build actually measured, so it works from the object
+  rather than from what it meant to make.
 - **Then change it yourself** — switch the left panel to Code and edit directly. The model
   re-renders as you type, and only when the code actually compiles; errors point at the line.
 - **Say what it's for** — the Readme panel is a Markdown editor for the project itself: the
@@ -120,8 +126,49 @@ without the library and renders both answers, for checking the claim rather than
 | Command | What it does |
 | --- | --- |
 | `npm run verify:patterns` | Grade every technique in the pattern library against BOSL2. |
+| `npm run verify:geometry` | Grade the measurements against solids with known answers. |
 | `npm run verify:patterns thread` | Grade just the patterns whose id matches. |
 | `npm run ab:patterns "..."` | Ask the real agent the same thing with and without the library. |
+
+### Measuring what came out
+
+A language model writes a program and never sees the solid it produced. So the studio measures
+it: `src/lib/geometry/inspect.ts` takes volume, surface area and center of mass off the mesh the
+renderer already made, checks that every edge has exactly two faces on it wound opposite ways,
+finds how much surface hangs past 45°, and works out whether the balance point falls inside the
+part touching the plate.
+
+Those numbers go three places — the readout behind the size in the toolbar, the spec document,
+and the next request to the agent, which is told them as fact and told to say so when they
+contradict what it claimed last turn. It rides along in the same single streaming request; there
+is no extra round trip.
+
+Two of them are defects rather than facts, and they speak up on their own: a surface that doesn't
+close silently produces a broken STL, and a model whose balance point sits outside its footprint
+falls over. Overhangs deliberately stay quiet — plenty of good models need support, and a warning
+that fires on half of all builds is one people stop reading.
+
+`npm run verify:geometry` grades all of it against solids with closed-form answers: a 20mm cube is
+8000mm³ exactly, a `$fn=6` cylinder is a hexagonal prism, a faceted sphere must come out *under*
+the smooth one. Surface defects can't be produced by OpenSCAD — its manifold backend always emits
+a closed solid — so those checks break a known-good mesh by hand and confirm each one is caught.
+
+### Cutting it open
+
+The measurement people most want is wall thickness, and it's the one the studio deliberately
+doesn't compute: every cheap approximation of it averages a thick base with a thin fin and reports
+neither, and the correct version is a ray cast against an acceleration structure. So instead the
+model gets cut in half and the ruler measures the exposed face — a real number, in a real place.
+
+The cut is made by OpenSCAD rather than by clipping the mesh in the viewer, so the cut face is
+real geometry: solid where the part is solid, hollow where it's hollow. `src/lib/geometry/section.ts`
+wraps the whole program in a module and differences a half-space out of it, which is verified to
+leave an uncut render identical to the original across top-level `$fn`, assignments, nested modules
+and functions.
+
+Measurements always describe the whole object, never the slice — a cut is a way of looking at the
+thing, not a different thing, so the renderer keeps the uncut mesh apart from the cut one and takes
+every number from the former.
 
 Rendering happens entirely in the browser. OpenSCAD is compiled to WebAssembly and runs in a Web
 Worker (so the interface never freezes), using the `manifold` backend and exporting `OFF` — which,
@@ -134,6 +181,8 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | --- | --- |
 | `src/app/api/design` | The design agent |
 | `src/lib/scadPatterns/` | The verified OpenSCAD technique library and its prompt injection |
+| `src/lib/geometry/` | Measuring the mesh, saying it in words, and cutting the model open |
+| `scripts/verify-geometry.mjs` | Grades the measurements against known solids — `npm run verify:geometry` |
 | `scripts/verify-patterns.mjs` | Grades every pattern against BOSL2 — `npm run verify:patterns` |
 | `scripts/lib/scad-render.mjs` | Renders and measures OpenSCAD in Node, using the browser's own wasm |
 | `src/app/api/auth`, `src/lib/auth.ts` | Email + password accounts, signed cookie sessions |

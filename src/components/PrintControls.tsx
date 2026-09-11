@@ -15,6 +15,8 @@ import {
 import { Dropdown, type DropdownOption } from "./Dropdown";
 import { WorkingText } from "./Working";
 import { MAX_PLATE_MM, MIN_PLATE_MM, PLATE_PRESETS } from "@/lib/types";
+import { factRows } from "@/lib/geometry/facts";
+import type { GeometryReport } from "@/lib/geometry/inspect";
 import type { ModelSize } from "@/hooks/useScadRenderer";
 
 const CUSTOM = "custom";
@@ -98,34 +100,122 @@ export function PlateSizePicker({
 }
 
 /**
- * The model's own outside dimensions — not the plate's.
+ * What the model is: its size, and everything else measurable about it.
  *
- * Labelled explicitly because it sits next to the plate picker, where bare numbers read as
- * though they describe the printer bed and look broken when they don't change with it.
+ * The size stays on the toolbar because it's the number people check constantly. The rest
+ * sits one click behind it rather than in a panel of its own — these are facts about the
+ * model, and a panel would hide the model you're reading them about.
+ *
+ * Labelled "Model" explicitly because it sits next to the plate picker, where bare numbers
+ * read as though they describe the printer bed and look broken when they don't change with it.
  */
-export function SizeReadout({ size, plateSizeMm }: { size: ModelSize; plateSizeMm: number }) {
+export function ModelFacts({
+  size,
+  plateSizeMm,
+  metrics,
+}: {
+  size: ModelSize;
+  plateSizeMm: number;
+  metrics: GeometryReport | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
   const overhangs = size.x > plateSizeMm || size.y > plateSizeMm;
+  const rows = metrics ? factRows(metrics) : [];
+  const problem = rows.some((row) => row.warn);
   const round = (value: number) => (value < 10 ? value.toFixed(1) : Math.round(value));
 
-  return (
-    <span
-      className={`flex items-center gap-1.5 text-xs ${overhangs ? "text-amber-400" : "text-mist-500"}`}
-      title={
-        overhangs
-          ? `This model is wider than your ${plateSizeMm}mm plate, so it won't fit as-is.`
-          : "The model's size: width × depth × height"
-      }
-    >
-      {overhangs ? (
-        <Warning size={13} weight="duotone" className="shrink-0" />
-      ) : (
-        <Ruler size={13} weight="duotone" className="shrink-0" />
-      )}
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const dimensions = (
+    <>
       <span className="font-medium">Model</span>
       <span className="font-mono">
         {round(size.x)} × {round(size.y)} × {round(size.z)} mm
       </span>
-    </span>
+    </>
+  );
+
+  const tone = problem || overhangs ? "text-amber-400" : "text-mist-500";
+  const Glyph = problem || overhangs ? Warning : Ruler;
+
+  // Until the measurements land — one frame after the model appears — there is nothing
+  // behind the click, so it stays the plain readout it has always been.
+  if (!rows.length) {
+    return (
+      <span
+        className={`flex items-center gap-1.5 text-xs ${tone}`}
+        title={
+          overhangs
+            ? `This model is wider than your ${plateSizeMm}mm plate, so it won't fit as-is.`
+            : "The model's size: width × depth × height"
+        }
+      >
+        <Glyph size={13} weight="duotone" className="shrink-0" />
+        {dimensions}
+      </span>
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={
+          overhangs
+            ? `This model is wider than your ${plateSizeMm}mm plate, so it won't fit as-is.`
+            : "What this model measures"
+        }
+        className={`flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs transition hover:bg-ink-800 hover:text-mist-300 ${tone}`}
+      >
+        <Glyph size={13} weight="duotone" className="shrink-0" />
+        {dimensions}
+        <CaretDown size={10} weight="bold" className="opacity-60" />
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="What this model measures"
+          className="absolute left-0 z-30 mt-1.5 w-72 overflow-hidden rounded-xl border border-ink-700 bg-ink-850 p-1 shadow-2xl"
+        >
+          {overhangs && (
+            <p className="px-3 pt-2 pb-1 text-xs text-amber-400">
+              Wider than your {plateSizeMm}mm plate, so it won&apos;t fit as it stands.
+            </p>
+          )}
+          <dl className="divide-y divide-ink-800">
+            {rows.map((row) => (
+              <div key={row.label} className="flex items-baseline gap-3 px-3 py-2">
+                <dt className="w-20 shrink-0 text-xs font-semibold text-mist-500">{row.label}</dt>
+                <dd className={`min-w-0 text-xs ${row.warn ? "text-amber-400" : "text-mist-200"}`}>
+                  {row.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -134,11 +224,20 @@ export function DownloadMenu({
   onDownloadStl,
   onOpenSpec,
   busy,
+  sectioned,
 }: {
   onDownloadScad: () => void;
   onDownloadStl: () => void;
   onOpenSpec: () => void;
   busy: boolean;
+  /**
+   * Whether the model is currently cut open.
+   *
+   * Only the write-up cares. It carries a picture of the viewport, and a picture of a
+   * sliced model is not a picture of the object. The two downloads are unaffected — both
+   * are rendered from the real program, never from what's on screen.
+   */
+  sectioned?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -203,7 +302,12 @@ export function DownloadMenu({
           <MenuItem
             Glyph={FileText}
             title="Spec document"
-            detail="The picture, the measurements and the code, written up"
+            detail={
+              sectioned
+                ? "Close the cut first — the write-up takes a picture of the model"
+                : "The picture, the measurements and the code, written up"
+            }
+            disabled={sectioned}
             onClick={() => {
               setOpen(false);
               onOpenSpec();
@@ -220,17 +324,20 @@ function MenuItem({
   title,
   detail,
   onClick,
+  disabled,
 }: {
   Glyph: Icon;
   title: string;
   detail: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       role="menuitem"
       onClick={onClick}
-      className="group flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-ink-800"
+      disabled={disabled}
+      className="group flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-ink-800 disabled:opacity-45 disabled:hover:bg-transparent"
     >
       <Glyph
         size={20}

@@ -9,6 +9,8 @@ import { encodeEvent, type AgentEvent } from "@/lib/agentEvents";
 import { StreamedFields } from "@/lib/partialJson";
 import { findAdvice, findProblems } from "@/lib/scadLint";
 import { PATTERN_INDEX, patternBrief } from "@/lib/scadPatterns/prompt";
+import { describeMeasurements } from "@/lib/geometry/facts";
+import { MAX_PLATE_MM, MIN_PLATE_MM } from "@/lib/types";
 
 // 300s is the platform maximum on Hobby and the default everywhere. Real requests land
 // at 30-50s; the headroom is for a complex model, not an expectation.
@@ -204,7 +206,8 @@ short line each, in their words — and you write that list before you write any
 building against something explicit rather than against a memory of the paragraph.
 
 Then be honest in the checkboxes. "Done" means the model as it stands right now satisfies that
-line. Not that you meant to, not that it's nearly there. A requirement marked done that isn't is
+line. Not that you meant to, not that it's nearly there. When a requirement is about a size and
+you were given measurements, tick it against the measurement, not against what you meant to build. A requirement marked done that isn't is
 worse than no list at all, because they'll stop checking.
 
 Once a checklist exists it is handed back to you on every later turn. Re-list all of it, every
@@ -326,6 +329,29 @@ The picture is what they want to make. Look at its overall shape and build a sim
 of basic solids. Don't chase fine detail or texture; clean and chunky prints better and reads better.
 Say what you spotted and what you simplified, so they know you looked.
 
+## What the last build actually measured
+Sometimes you are given measurements below. They were taken off the mesh the renderer produced,
+not estimated, so they are true — and they describe THE LAST BUILD THAT RENDERED, which after a
+failed edit is not the same as the code in front of you.
+
+- Never contradict them, and never state a measurement you weren't given. If you want a number
+  that isn't there, say you'd have to build it and look.
+- Don't recite the list back. One measurement that matters beats five that don't.
+- **When a measurement contradicts what you said last turn, say so plainly.** "I said 60mm and it
+  came out 62.4 — the rounded top added height" is the most useful sentence you can write here.
+- Volume and weight assume a solid lump. A real print is mostly hollow, so never give a weight as
+  fact — "about 10 grams if it were solid" is the honest way to say it.
+- **Not closed is a real defect**, not a detail: the download comes out broken. Fix that before
+  you add anything else, and say that's what you're doing.
+- On a steep overhang, say roughly where it is and offer to change the SHAPE — a chamfer under
+  it, a taper, standing the part a different way up. Don't tell them to turn on supports; the
+  object is the thing they can change.
+- If the balance point sits outside the footprint, or it touches the plate over almost nothing,
+  raise it without being asked. It'll fall over or come off the plate, and they'll find out the
+  slow way.
+- Say all of this in shapes. Never "mesh", "manifold", "normals", "watertight", "non-manifold".
+  "It's got a hole in it" and "it's closed all the way round" are the words.
+
 ${PATTERN_INDEX}`;
 
 /**
@@ -390,6 +416,30 @@ const RequestSchema = z.object({
     .array(z.object({ text: z.string().max(300), done: z.boolean() }))
     .max(12)
     .optional(),
+  /**
+   * What the last successful render actually measured.
+   *
+   * Every field is a bounded number or a boolean, and the sentences the model reads are
+   * written from them on this side. No string the browser controls reaches the prompt
+   * through here, so a field can't be used to say something the person didn't say.
+   */
+  measured: z
+    .object({
+      size: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+      volume: z.number().nonnegative().finite(),
+      area: z.number().nonnegative().finite(),
+      centroid: z.object({ x: z.number(), y: z.number(), z: z.number() }).nullable(),
+      watertight: z.boolean(),
+      openEdges: z.number().int().nonnegative().max(10_000_000),
+      overhangArea: z.number().nonnegative().finite(),
+      overhangFraction: z.number().min(0).max(1),
+      steepestOverhangDeg: z.number().min(0).max(90),
+      contactArea: z.number().nonnegative().finite(),
+      tipMarginMm: z.number().finite().nullable(),
+    })
+    .optional(),
+  /** The plate it has to fit on. Known even before anything has been built. */
+  plateSizeMm: z.number().int().min(MIN_PLATE_MM).max(MAX_PLATE_MM).optional(),
   /** Present when the browser's renderer rejected code we just produced. */
   repair: z
     .object({
@@ -623,6 +673,14 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
   let text = currentCode
     ? `Here is the code for what I have right now:\n\n${currentCode}\n\nPlease change it: ${prompt}`
     : prompt;
+
+  // Measured, not estimated — and placed right after the code it was taken off, so the
+  // program and what it actually produced read together.
+  if (body.measured) {
+    text += `\n\n${describeMeasurements(body.measured, body.plateSizeMm)}`;
+  } else if (body.plateSizeMm) {
+    text += `\n\nTheir build plate is ${body.plateSizeMm} mm square.`;
+  }
 
   // Handed back verbatim so the list belongs to the object rather than to whichever message
   // happened to start it — the model has no other way to know what it already promised.

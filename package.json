@@ -11,6 +11,7 @@
     "db:stop": "docker stop scaid-mongo",
     "db:logs": "docker logs -f scaid-mongo",
     "verify:patterns": "tsx scripts/verify-patterns.mjs",
+    "verify:geometry": "tsx scripts/verify-geometry.mjs",
     "ab:patterns": "tsx scripts/ab-patterns.mts"
   },
   "dependencies": {

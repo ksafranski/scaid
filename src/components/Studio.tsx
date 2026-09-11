@@ -40,7 +40,8 @@ import { useScadRenderer } from "@/hooks/useScadRenderer";
 import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
 import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
-import { DownloadMenu, PlateSizePicker, SizeReadout } from "./PrintControls";
+import { DownloadMenu, ModelFacts, PlateSizePicker } from "./PrintControls";
+import { factProblem, toMeasured } from "@/lib/geometry/facts";
 import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
@@ -183,7 +184,17 @@ export function Studio({
   initialPlateSizeMm: number;
 }) {
   const [plateSizeMm, setPlateSizeMm] = useState(initialPlateSizeMm);
-  const { modelUrl, isRendering, error: renderError, size, render, reset } = useScadRenderer(plateSizeMm);
+  const {
+    modelUrl,
+    isRendering,
+    error: renderError,
+    size,
+    metrics,
+    section,
+    render,
+    reset,
+    setSection,
+  } = useScadRenderer(plateSizeMm);
   const { width: panelWidth, handleProps } = usePanelWidth();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -497,6 +508,10 @@ export function Studio({
         prompt: trimmed,
         currentCode: design?.code,
         requirements: design?.requirements,
+        // What the thing on screen actually came out as, so the next turn reasons about
+        // the object rather than about what it meant to build.
+        measured: metrics ? (toMeasured(metrics) ?? undefined) : undefined,
+        plateSizeMm,
         history,
         image: image
           ? { mediaType: image.mediaType, data: image.data, kind: image.kind }
@@ -641,6 +656,22 @@ export function Studio({
     );
   }
 
+  /**
+   * Speaks up when a measurement finds something certain and serious.
+   *
+   * Keyed on what's wrong rather than on the render, so a defect that persists across a
+   * dozen keystrokes is mentioned once, and mentioned again only if it goes away and
+   * comes back.
+   */
+  const reportedProblemRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!metrics) return;
+    const problem = factProblem(metrics);
+    if (problem === reportedProblemRef.current) return;
+    reportedProblemRef.current = problem;
+    if (problem) setMessages((prev) => [...prev, { kind: "note", text: problem }]);
+  }, [metrics]);
+
   /** Marks the checkpoint on one turn as settled, so its choices stop asking to be made. */
   function markDone(index: number) {
     setMessages((prev) =>
@@ -711,6 +742,7 @@ export function Studio({
     }
 
     reset(); // the viewport must clear too, not just the conversation
+    reportedProblemRef.current = null; // a fresh build gets to raise the same problem again
     setMessages([]);
     setDesign(null);
     setSavedId(null);
@@ -782,7 +814,7 @@ export function Studio({
   async function openSpec() {
     if (!design) return;
     const image = (await snapshotRef.current?.()) ?? null;
-    setSpec(buildSpec({ design, size, plateSizeMm, image, readme }));
+    setSpec(buildSpec({ design, size, metrics, plateSizeMm, image, readme }));
   }
 
   async function attachFile(file: File | undefined) {
@@ -895,7 +927,7 @@ export function Studio({
         <div className="ml-auto flex items-center gap-3">
           {size && (
             <>
-              <SizeReadout size={size} plateSizeMm={plateSizeMm} />
+              <ModelFacts size={size} plateSizeMm={plateSizeMm} metrics={metrics} />
               <span aria-hidden className="h-5 w-px bg-ink-700" />
             </>
           )}
@@ -911,6 +943,7 @@ export function Studio({
                   onDownloadStl={downloadStl}
                   onOpenSpec={openSpec}
                   busy={exporting}
+                  sectioned={Boolean(section)}
                 />
               )}
               {/*
@@ -1126,6 +1159,9 @@ export function Studio({
             spinning={isRendering}
             captureRef={captureMarkupRef}
             snapshotRef={snapshotRef}
+            section={section}
+            sectionBounds={metrics && !metrics.empty ? metrics.bounds : null}
+            onSection={setSection}
           />
 
           {isRendering && <WorkingOverlay label="Building the model…" />}

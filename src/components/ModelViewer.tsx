@@ -8,6 +8,7 @@ import {
   Cube,
   Lasso,
   Ruler,
+  SquareHalf,
   Trash,
   X,
   type Icon,
@@ -27,6 +28,14 @@ import {
   type Spot,
 } from "@/lib/measure";
 import type { PreparedImage } from "@/lib/imageAttachment";
+import {
+  defaultPosition,
+  sectionRange,
+  startingAxis,
+  type Axis,
+  type Section,
+} from "@/lib/geometry/section";
+import type { Bounds } from "@/lib/geometry/inspect";
 import type { ModelViewerElement } from "@/types/model-viewer";
 
 // The model sits Z-up like OpenSCAD; model-viewer is Y-up, so tip it a quarter turn.
@@ -49,6 +58,24 @@ function panModifier(): string {
 }
 
 type Tool = "region" | "arrow" | "measure";
+
+/**
+ * The cut's colour: amber, deliberately unlike the teal of a measurement and the pink of a
+ * mark, because all three can be on screen together.
+ */
+const SECTION_COLOR = "#f5a524";
+
+const AXIS_LABELS: Array<{ axis: Axis; label: string; hint: string }> = [
+  { axis: "x", label: "X", hint: "Cut across, left to right" },
+  { axis: "y", label: "Y", hint: "Cut across, front to back" },
+  { axis: "z", label: "Z", hint: "Cut level, like a floor" },
+];
+
+/** A fresh cut: straight down through the middle, which is what "cut it open" means. */
+function startingSection(bounds: Bounds): Section {
+  const axis = startingAxis(bounds);
+  return { axis, position: defaultPosition(bounds, axis) };
+}
 
 /**
  * The slot name for one end of a measurement.
@@ -138,9 +165,17 @@ export function ModelViewer({
   spinning,
   captureRef,
   snapshotRef,
+  section,
+  sectionBounds,
+  onSection,
 }: {
   src: string | null;
   spinning: boolean;
+  /** The cut currently being looked through, or null for the whole model. */
+  section?: Section | null;
+  /** The whole model's extents, which bound where the cut can be placed. */
+  sectionBounds?: Bounds | null;
+  onSection?: (section: Section | null) => void;
   /**
    * Filled in with a function the composer calls as it sends.
    *
@@ -294,6 +329,19 @@ export function ModelViewer({
       setHovered(null);
     }
     setTool(next);
+  }
+
+  /**
+   * Opens, moves or closes the cut.
+   *
+   * The ruler is left alone on purpose — cutting the model open and then measuring the wall
+   * you've exposed is the entire reason this exists. The marking tools are not: a loop
+   * drawn on a sliced model travels to the agent as a picture of the model "as it looks
+   * right now", and what it looks like right now is an object with a wedge out of it.
+   */
+  function chooseSection(next: Section | null) {
+    if (next && (tool === "region" || tool === "arrow")) chooseTool(null);
+    onSection?.(next);
   }
 
   function addMark(mark: Mark) {
@@ -809,8 +857,20 @@ export function ModelViewer({
 
       {src && modelShown && captureRef && (
         <div className="absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-1 shadow-lg shadow-black/40">
-          <ToolButton active={tool === "region"} onClick={() => chooseTool(tool === "region" ? null : "region")} Glyph={Lasso} label="Circle a part" />
-          <ToolButton active={tool === "arrow"} onClick={() => chooseTool(tool === "arrow" ? null : "arrow")} Glyph={ArrowUpRight} label="Point at something" />
+          <ToolButton
+            active={tool === "region"}
+            disabled={Boolean(section)}
+            onClick={() => chooseTool(tool === "region" ? null : "region")}
+            Glyph={Lasso}
+            label={section ? "Close the cut to circle a part" : "Circle a part"}
+          />
+          <ToolButton
+            active={tool === "arrow"}
+            disabled={Boolean(section)}
+            onClick={() => chooseTool(tool === "arrow" ? null : "arrow")}
+            Glyph={ArrowUpRight}
+            label={section ? "Close the cut to point at something" : "Point at something"}
+          />
           <ToolButton
             active={tool === "measure"}
             tone={MEASURE_COLOR}
@@ -818,6 +878,17 @@ export function ModelViewer({
             Glyph={Ruler}
             label="Measure it"
           />
+          {onSection && sectionBounds && (
+            <ToolButton
+              active={Boolean(section)}
+              tone={SECTION_COLOR}
+              onClick={() =>
+                chooseSection(section ? null : startingSection(sectionBounds))
+              }
+              Glyph={SquareHalf}
+              label="Cut it open"
+            />
+          )}
 
           {order.length > 0 && (
             <>
@@ -829,8 +900,21 @@ export function ModelViewer({
         </div>
       )}
 
+      {src && modelShown && section && sectionBounds && onSection && (
+        <SectionControls
+          key={section.axis}
+          section={section}
+          bounds={sectionBounds}
+          onChange={chooseSection}
+        />
+      )}
+
       {src && modelShown && marking && (
-        <p className="pointer-events-none absolute top-20 right-5 z-20 max-w-[15rem] rounded-lg bg-ink-850/95 px-3 py-1.5 text-right text-xs font-medium text-mist-300">
+        <p
+          className={`pointer-events-none absolute right-5 z-20 max-w-[15rem] rounded-lg bg-ink-850/95 px-3 py-1.5 text-right text-xs font-medium text-mist-300 ${
+            section ? "top-44" : "top-20"
+          }`}
+        >
           {tool === "measure"
             ? "Click a spot for its position, or drag from one spot to another"
             : marks.length > 0
@@ -1154,6 +1238,7 @@ function ToolButton({
   Glyph,
   label,
   tone = MARKUP_COLOR,
+  disabled,
 }: {
   active?: boolean;
   onClick: () => void;
@@ -1161,19 +1246,99 @@ function ToolButton({
   label: string;
   /** What the button lights up as — the same colour the tool draws in. */
   tone?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       title={label}
       aria-label={label}
       aria-pressed={active ?? false}
       style={active ? { backgroundColor: tone, color: tone === MARKUP_COLOR ? undefined : "#0b0e14" } : undefined}
-      className={`rounded-lg p-2 transition ${
+      className={`rounded-lg p-2 transition disabled:opacity-35 disabled:hover:bg-transparent ${
         active ? "text-white" : "text-mist-300 hover:bg-ink-700 hover:text-mist-100"
       }`}
     >
       <Glyph size={17} weight="bold" />
     </button>
+  );
+}
+
+/**
+ * Which way to cut, and where.
+ *
+ * The slider is bounded strictly inside the model. A cut placed exactly on a face removes
+ * everything and OpenSCAD renders an empty file, so the ends of this track are the one
+ * place the control must not be able to reach.
+ *
+ * Moving it recompiles the model, which costs what a build costs — so the number follows
+ * the thumb immediately and the render follows a moment behind it, rather than firing on
+ * every pixel of a drag.
+ */
+function SectionControls({
+  section,
+  bounds,
+  onChange,
+}: {
+  section: Section;
+  bounds: Bounds;
+  onChange: (section: Section) => void;
+}) {
+  const { min, max } = sectionRange(bounds, section.axis);
+  const [draft, setDraft] = useState(section.position);
+
+  useEffect(() => {
+    if (draft === section.position) return;
+    const timer = setTimeout(() => onChange({ axis: section.axis, position: draft }), 180);
+    return () => clearTimeout(timer);
+  }, [draft, section.axis, section.position, onChange]);
+
+  return (
+    <div className="absolute top-20 right-5 z-30 w-56 rounded-xl border border-ink-700 bg-ink-850/95 p-3 shadow-lg shadow-black/40 backdrop-blur">
+      <p className="text-[10px] font-semibold tracking-[0.08em] text-mist-500 uppercase">
+        Cut it open
+      </p>
+
+      <div className="mt-2 flex gap-1">
+        {AXIS_LABELS.map(({ axis, label, hint }) => {
+          const active = section.axis === axis;
+          const range = sectionRange(bounds, axis);
+          return (
+            <button
+              key={axis}
+              title={hint}
+              onClick={() => onChange({ axis, position: (range.min + range.max) / 2 })}
+              style={active ? { backgroundColor: SECTION_COLOR, color: "#0b0e14" } : undefined}
+              className={`flex-1 rounded-lg py-1 text-xs font-semibold transition ${
+                active ? "" : "text-mist-400 hover:bg-ink-700 hover:text-mist-100"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={Math.max(0.05, (max - min) / 400)}
+        value={draft}
+        aria-label={`Where to cut along ${section.axis.toUpperCase()}`}
+        onChange={(event) => setDraft(Number(event.target.value))}
+        style={{ accentColor: SECTION_COLOR }}
+        className="mt-3 w-full"
+      />
+
+      <p className="mt-1 text-center text-xs tabular-nums text-mist-400">
+        {section.axis.toUpperCase()} = {mm(draft)} mm
+      </p>
+
+      <p className="mt-2 border-t border-ink-700 pt-2 text-[10px] leading-snug text-mist-500">
+        The ruler still works — measure straight across a wall to see how thick it is.
+      </p>
+    </div>
   );
 }
