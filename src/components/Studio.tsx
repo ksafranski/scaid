@@ -929,27 +929,7 @@ export function Studio({
 
   return (
     <div className="flex h-screen flex-col">
-      <TopBar nickname={nickname} current="studio" />
-
-      {/* One toolbar for the workspace: what's on the left, and what you can do with it. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-850 px-4 py-2.5">
-        <div className="flex gap-1 rounded-xl bg-ink-900 p-1">
-          <ViewButton active={shownView === "chat"} onClick={() => setView("chat")} Glyph={ChatCircleDots}>
-            Chat
-          </ViewButton>
-          <ViewButton active={shownView === "code"} onClick={() => setView("code")} Glyph={Code}>
-            Code
-          </ViewButton>
-          {parameters.length > 0 && (
-            <ViewButton active={shownView === "dials"} onClick={() => setView("dials")} Glyph={Sliders}>
-              Dials
-            </ViewButton>
-          )}
-          <ViewButton active={shownView === "readme"} onClick={() => setView("readme")} Glyph={Notebook}>
-            Readme
-          </ViewButton>
-        </div>
-
+      <TopBar nickname={nickname} current="studio">
         {(messages.length > 0 || canSave) &&
           (confirmingNew ? (
             <div className="flex items-center gap-2 text-sm">
@@ -970,12 +950,32 @@ export function Studio({
           ) : (
             <button
               onClick={() => (hasUnsavedWork ? setConfirmingNew(true) : startNew())}
-              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold text-mist-500 transition hover:bg-ink-800 hover:text-mist-100"
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-mist-500 transition hover:bg-ink-800 hover:text-mist-100"
             >
               <Plus size={15} weight="bold" />
               New
             </button>
           ))}
+      </TopBar>
+
+      {/* One toolbar for the workspace: what's on the left, and what you can do with it. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-850 px-4 py-2.5">
+        <div className="flex gap-1 rounded-xl bg-ink-900 p-1">
+          <ViewButton active={shownView === "chat"} onClick={() => setView("chat")} Glyph={ChatCircleDots}>
+            Chat
+          </ViewButton>
+          <ViewButton active={shownView === "code"} onClick={() => setView("code")} Glyph={Code}>
+            Code
+          </ViewButton>
+          {parameters.length > 0 && (
+            <ViewButton active={shownView === "dials"} onClick={() => setView("dials")} Glyph={Sliders}>
+              Dials
+            </ViewButton>
+          )}
+          <ViewButton active={shownView === "readme"} onClick={() => setView("readme")} Glyph={Notebook}>
+            Readme
+          </ViewButton>
+        </div>
 
         <div className="ml-auto flex items-center gap-3">
           {size && (

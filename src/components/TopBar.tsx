@@ -6,7 +6,21 @@ import { SignOut } from "@phosphor-icons/react";
 import { Logo } from "./Logo";
 import { clearSession } from "@/lib/studioSession";
 
-export function TopBar({ nickname, current }: { nickname: string; current: "studio" | "gallery" }) {
+export function TopBar({
+  nickname,
+  current,
+  children,
+}: {
+  nickname: string;
+  current: "studio" | "gallery";
+  /**
+   * Anything the page wants to sit beside the mark, divided off from it.
+   *
+   * For starting over, which acts on the whole session rather than on the panel below —
+   * so it belongs up here with the name of the thing it clears, not in the row of views.
+   */
+  children?: React.ReactNode;
+}) {
   const router = useRouter();
 
   async function logout() {
@@ -18,9 +32,19 @@ export function TopBar({ nickname, current }: { nickname: string; current: "stud
 
   return (
     <header className="flex shrink-0 items-center justify-between gap-4 border-b border-ink-700 bg-ink-850 px-5 py-3">
-      <Link href="/studio" aria-label="Scaid home">
-        <Logo />
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link href="/studio" aria-label="Scaid home">
+          <Logo />
+        </Link>
+
+        {/* The rule belongs to whatever's beside it, so it goes when that does. */}
+        {children && (
+          <>
+            <span aria-hidden className="h-5 w-px bg-ink-700" />
+            {children}
+          </>
+        )}
+      </div>
 
       <nav className="flex items-center gap-1">
         <NavLink href="/studio" active={current === "studio"}>
