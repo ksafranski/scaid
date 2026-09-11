@@ -29,6 +29,10 @@ const { checkExpectations, misses, describeMisses, MEASURABLES } = await import(
 );
 const { snapTo } = await import("../src/lib/measure.ts");
 const { export3mf } = await import("../src/lib/export3mf.ts");
+const { record, measured, describeChange, ago, MAX_VERSIONS, HAND_EDIT } = await import(
+  "../src/lib/versions.ts"
+);
+const { toMeasured } = await import("../src/lib/geometry/facts.ts");
 
 const filter = process.argv[2];
 
@@ -857,6 +861,111 @@ function readModelMesh(xml) {
   return { vertices, faces, colors: [] };
 }
 
+/**
+ * Keeping the build as it was.
+ *
+ * The list logic is pure, so it is tested on its own rather than by driving the studio at
+ * it: what gets kept, what gets folded together, and what falls off the end are decisions
+ * that should be arguable without a browser in the room.
+ */
+const VERSIONS = [
+  check("history › a change is kept, and the same program twice is not", () => {
+    let history = record([], { code: "cube(10);", label: "Made a cube", at: 1000 });
+    is(history.length, 1, "first change");
+    history = record(history, { code: "cube(10);", label: "Made a cube", at: 2000 });
+    is(history.length, 1, "the same program again");
+    history = record(history, { code: "cube(20);", label: "Made it bigger", at: 3000 });
+    is(history.length, 2, "a real change");
+    is(history[1].label, "Made it bigger", "why it changed");
+  }),
+
+  check("history › a burst of hand edits is one change, a turn is never folded in", () => {
+    // Dragging a dial writes the program every pause. Four of those is one decision.
+    let history = record([], { code: "a", label: HAND_EDIT, at: 0 });
+    for (const [code, at] of [["b", 900], ["c", 1800], ["d", 2700]]) {
+      history = record(history, { code, label: HAND_EDIT, at });
+    }
+    is(history.length, 1, "the burst");
+    is(history[0].code, "d", "and it holds where the burst ended");
+    is(history[0].at, 0, "timed from when it started");
+
+    // Far enough apart to be two decisions.
+    history = record(history, { code: "e", label: HAND_EDIT, at: 60_000 });
+    is(history.length, 2, "a separate edit");
+
+    // An agent turn is never swallowed, however fast it lands after an edit.
+    history = record(history, { code: "f", label: "Added a lid", at: 60_100 });
+    is(history.length, 3, "a turn stands on its own");
+  }),
+
+  check("history › it stops growing", () => {
+    let history = [];
+    for (let i = 0; i < MAX_VERSIONS + 10; i++) {
+      history = record(history, { code: `v${i}`, label: `turn ${i}`, at: i * 60_000 });
+    }
+    is(history.length, MAX_VERSIONS, "how many are kept");
+    is(history[history.length - 1].code, `v${MAX_VERSIONS + 9}`, "the newest survives");
+    is(history[0].code, "v10", "the oldest is the one that went");
+  }),
+
+  check("history › measurements land on the version they belong to", async () => {
+    const cube = await inspect("cube(20);");
+    let history = record([], { code: "cube(20);", label: "A cube", at: 0 });
+    is(history[0].measured, null, "not measured yet");
+
+    history = measured(history, "cube(20);", toMeasured(cube));
+    near(history[0].measured.volume, 8000, 1e-6, "what it measured");
+
+    // Measurements of some other program must not be written onto this one.
+    const other = measured(history, "cube(30);", toMeasured(cube));
+    is(other, history, "a mismatch changes nothing");
+  }),
+
+  check("change › the difference between two builds reads off their measurements", async () => {
+    const before = toMeasured(await inspect("cube([20, 20, 20]);"));
+    const taller = toMeasured(await inspect("cube([20, 20, 30]);"));
+    const said = describeChange(before, taller);
+    if (!said.includes("10mm taller")) throw new Error(`didn't notice the height: ${said}`);
+    if (!said.includes("heavier")) throw new Error(`didn't notice the material: ${said}`);
+
+    const shorter = describeChange(taller, before);
+    if (!shorter.includes("shorter")) throw new Error(`a shrink reads as a shrink: ${shorter}`);
+    if (!shorter.includes("lighter")) throw new Error(`lighter: ${shorter}`);
+  }),
+
+  check("change › a change too small to notice says so", async () => {
+    const before = toMeasured(await inspect("cube(20);"));
+    is(describeChange(before, before), "Same size", "nothing moved");
+    is(describeChange(null, before), "", "nothing to compare against");
+  }),
+
+  check("change › support appearing is worth saying", async () => {
+    const flat = toMeasured(await inspect("cube([30, 30, 5]);"));
+    const capped = toMeasured(
+      await inspect("$fn=32; union() { cylinder(h=20, r=4); translate([0,0,20]) cylinder(h=4, r=18); }"),
+    );
+    const appearing = describeChange(flat, capped);
+    if (!/now needs support/i.test(appearing)) {
+      throw new Error(`support appearing went unmentioned: ${appearing}`);
+    }
+    // And it leads, ahead of any number of millimetres, because it matters more.
+    if (!/^now needs support/i.test(appearing)) {
+      throw new Error(`support was mentioned but buried: ${appearing}`);
+    }
+    if (!/needs no support/i.test(describeChange(capped, flat))) {
+      throw new Error("support going away went unmentioned");
+    }
+  }),
+
+  check("history › when it happened, in words", () => {
+    const now = 1_000_000_000;
+    is(ago(now, now), "just now", "now");
+    is(ago(now - 240_000, now), "4 minutes ago", "minutes");
+    is(ago(now - 7_200_000, now), "2 hours ago", "hours");
+    is(ago(now - 172_800_000, now), "2 days ago", "days");
+  }),
+];
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -902,7 +1011,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS]) {
   if (!item) continue;
   const started = Date.now();
   try {

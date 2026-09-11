@@ -44,11 +44,18 @@ import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
 import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
 import { DownloadMenu, ModelFacts, PlateSizePicker } from "./PrintControls";
+import { History } from "./History";
 import { factProblem, toMeasured } from "@/lib/geometry/facts";
 import { Dials } from "./Dials";
 import { parseParameters, setParameter } from "@/lib/scadParameters";
 import { turnSource } from "@/lib/geometry/orientation";
 import { export3mf } from "@/lib/export3mf";
+import {
+  HAND_EDIT,
+  measured as recordMeasurements,
+  record as recordVersion,
+  type Version,
+} from "@/lib/versions";
 import {
   checkExpectations,
   describeMisses,
@@ -229,6 +236,13 @@ export function Studio({
   const [lastPrompt, setLastPrompt] = useState("");
   const [prompt, setPrompt] = useState("");
   const [attachment, setAttachment] = useState<PreparedAttachment | null>(null);
+  /**
+   * The build as it was, each time it changed.
+   *
+   * Held here rather than in the renderer because what makes a version is a decision — a
+   * turn, an edit — and the renderer only ever sees a program arriving.
+   */
+  const [versions, setVersions] = useState<Version[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [activity, setActivity] = useState<Activity>(IDLE_ACTIVITY);
@@ -322,6 +336,11 @@ export function Studio({
       setDesign(next);
       setSaveState("idle");
       setIncomplete(null); // whatever was half-typed has just been replaced
+      if (next.code.trim()) {
+        setVersions((prev) =>
+          recordVersion(prev, { code: next.code, label: next.summary || "Changed it", at: Date.now() }),
+        );
+      }
       render(next.code);
     },
     [render],
@@ -344,6 +363,7 @@ export function Studio({
     setReadme(snapshot.readme ?? "");
     setView(snapshot.view);
     setSaveState(snapshot.saved ? "saved" : "idle");
+    setVersions(snapshot.versions ?? []);
 
     render(snapshot.design.code);
     restoredRef.current = true;
@@ -361,8 +381,9 @@ export function Studio({
       readme,
       view,
       saved: saveState === "saved",
+      versions,
     });
-  }, [messages, design, savedId, lastPrompt, readme, view, saveState]);
+  }, [messages, design, savedId, lastPrompt, readme, view, saveState, versions]);
 
   /**
    * Creations already loaded from the URL, so each one opens exactly once.
@@ -392,6 +413,7 @@ export function Studio({
       setSavedId(creation.id);
       setLastPrompt(creation.prompt);
       setReadme(creation.readme ?? "");
+      setVersions(creation.versions ?? []);
 
       // A draft has no model and no conversation behind it — only the writing. Opening it
       // onto an empty chat panel would look like the plan had been lost, so it opens where
@@ -666,6 +688,9 @@ export function Studio({
           },
     );
     setSaveState("idle");
+    if (next.trim()) {
+      setVersions((prev) => recordVersion(prev, { code: next, label: HAND_EDIT, at: Date.now() }));
+    }
     if (editTimerRef.current) clearTimeout(editTimerRef.current);
 
     // Half-typed code isn't a mistake, so it doesn't get compiled and it doesn't get an
@@ -711,6 +736,25 @@ export function Studio({
    * Written into the program rather than applied to the view, so it is a change to the
    * object they can see, keep, undo and download — not a setting hiding somewhere.
    */
+  /**
+   * Puts an earlier version back.
+   *
+   * Recorded as a change rather than by winding the list back, so nothing is lost by
+   * looking: the version you left is still in the history, and undoing a restore is just
+   * restoring the other one.
+   */
+  function restoreVersion(version: Version) {
+    if (!design) return;
+    setDesign({ ...design, code: version.code, expectations: undefined });
+    setSaveState("idle");
+    setIncomplete(null);
+    setBrokenPromise(null);
+    setVersions((prev) =>
+      recordVersion(prev, { code: version.code, label: "Put back an earlier version", at: Date.now() }),
+    );
+    render(version.code);
+  }
+
   function turnModel() {
     const current = design?.code;
     if (!current || !advice) return;
@@ -745,6 +789,13 @@ export function Studio({
       ),
     );
   }
+
+  // A version is written when the program changes; what it measures only exists once it has
+  // been built. This is where the two meet.
+  useEffect(() => {
+    if (!metrics || !measuredCode) return;
+    setVersions((prev) => recordMeasurements(prev, measuredCode, toMeasured(metrics)));
+  }, [metrics, measuredCode]);
 
   /**
    * Holds the build to the sizes it said it would be.
@@ -875,6 +926,7 @@ export function Studio({
     reportedProblemRef.current = null; // a fresh build gets to raise the same problem again
     setBrokenPromise(null);
     checkedCodeRef.current = null;
+    setVersions([]);
     setMessages([]);
     setDesign(null);
     setSavedId(null);
@@ -995,7 +1047,7 @@ export function Studio({
     let response = await fetch("/api/creations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: savedId, prompt: lastPrompt, readme, ...record }),
+      body: JSON.stringify({ id: savedId, prompt: lastPrompt, readme, versions, ...record }),
     });
 
     // The build we were updating has been deleted (here, or in another tab). Save it as a
@@ -1005,7 +1057,7 @@ export function Studio({
       response = await fetch("/api/creations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: lastPrompt, readme, ...record }),
+        body: JSON.stringify({ prompt: lastPrompt, readme, versions, ...record }),
       });
     }
 
@@ -1073,6 +1125,16 @@ export function Studio({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          {versions.length > 1 && (
+            <>
+              <History
+                versions={versions}
+                currentCode={design?.code ?? ""}
+                onRestore={restoreVersion}
+              />
+              <span aria-hidden className="h-5 w-px bg-ink-700" />
+            </>
+          )}
           {size && (
             <>
               <ModelFacts

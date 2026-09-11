@@ -9,6 +9,7 @@
  * something that should resurface days later next to a different build.
  */
 import type { BuildStep } from "./types";
+import type { Version } from "./versions";
 
 const KEY = "scaid.studioSession";
 
@@ -32,6 +33,8 @@ export interface StudioSnapshot {
   readme?: string;
   view: "chat" | "code" | "dials" | "readme";
   saved: boolean;
+  /** The build as it was, each time it changed. Absent on a session stored before history. */
+  versions?: Version[];
 }
 
 export function saveSession(snapshot: StudioSnapshot): void {
@@ -50,6 +53,15 @@ export function saveSession(snapshot: StudioSnapshot): void {
         ),
       };
       payload = JSON.stringify(lean);
+    }
+
+    // Still too big, so the history goes — oldest first. It is the one thing here that can
+    // be given up a piece at a time, and the work in front of them outranks the record of
+    // how it got there.
+    let trimmed = snapshot.versions ?? [];
+    while (payload.length > MAX_CHARS && trimmed.length) {
+      trimmed = trimmed.slice(1);
+      payload = JSON.stringify({ ...snapshot, versions: trimmed });
     }
 
     sessionStorage.setItem(KEY, payload);

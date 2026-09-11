@@ -3,6 +3,39 @@ import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import { requireUser } from "@/lib/auth";
 import { toCreation, type BuildStep, type CreationDoc } from "@/lib/types";
+import { MAX_VERSIONS, type Version } from "@/lib/versions";
+
+/**
+ * The history, checked before it is stored.
+ *
+ * Everything here arrives from a browser, so none of it is trusted: the shape, the count and
+ * the size of each program are all re-imposed rather than assumed. The measurements are kept
+ * as they came, because they are only ever read back to describe a difference — nothing is
+ * decided on them, and a wrong one costs a sentence rather than a model.
+ */
+function sanitizeVersions(value: unknown): Version[] {
+  if (!Array.isArray(value)) return [];
+
+  const clean = value
+    .filter(
+      (entry): entry is Version =>
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        typeof (entry as Version).code === "string" &&
+        (entry as Version).code.length <= 60_000 &&
+        typeof (entry as Version).label === "string" &&
+        typeof (entry as Version).at === "number" &&
+        Number.isFinite((entry as Version).at),
+    )
+    .map((entry) => ({
+      code: entry.code,
+      label: entry.label.slice(0, 300),
+      measured: entry.measured ?? null,
+      at: entry.at,
+    }));
+
+  return clean.slice(-MAX_VERSIONS);
+}
 
 /** List everything the signed-in user has saved, newest first. */
 export async function GET() {
@@ -26,7 +59,7 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Please log in first." }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { id, name, prompt, code, description, summary, steps, readme } = body ?? {};
+  const { id, name, prompt, code, description, summary, steps, readme, versions } = body ?? {};
 
   // A readme on its own is a saveable record: a plan written before the model exists is
   // still work worth keeping. Only a record with neither is nothing at all.
@@ -50,6 +83,9 @@ export async function POST(request: Request) {
     // The maker's own words, so unlike the name and description there's no agent version
     // of this to protect it from — it's saved as written every time.
     readme: typeof readme === "string" ? readme.slice(0, 20_000) : "",
+    // Trimmed here as well as in the browser. The cap is what keeps a record from growing
+    // without limit over a long afternoon, and a cap only the client honours isn't one.
+    versions: sanitizeVersions(versions),
     updatedAt: now,
   };
 

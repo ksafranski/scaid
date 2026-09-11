@@ -35,6 +35,9 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
 - **Write it up** — open the spec document for your readme, the picture, the measurements, the
   reasoning and the code as one page. Copy it straight into a Google Doc, or save it as Markdown
   with the picture alongside.
+- **Go back** — every version is kept, with what changed between them measured rather than
+  guessed: "15mm taller, 75% heavier". Putting one back is recorded too, so nothing is lost by
+  looking.
 - **Keep it** — builds save to your account and reopen for further work. A record with a readme
   and no model yet is a draft, tagged as one in the library, and opens straight back to the writing.
 
@@ -168,6 +171,26 @@ Only a number, `true`/`false`, or one of a listed set of strings is ever written
 these as expressions, so a value carrying a semicolon would be a second statement, and a value that
 isn't a number at all becomes `undef` and renders a silently wrong shape rather than an error.
 Both are refused before they reach the program.
+
+### Keeping every version
+
+Saving overwrote. That is the wrong shape for a tool whose argument is that a model gets good by
+being changed — it kept exactly one of the changes, and the one before the change you regret was
+gone.
+
+`src/lib/versions.ts` keeps each turn, with what it measured beside it. Keeping the measurements
+is what makes the difference between two versions free to describe: "15mm taller, 75% heavier" is
+read off two records rather than by compiling anything, and it cannot disagree with what either
+version said when it was current.
+
+A burst of edits is one version. Dragging a dial writes the program on every pause, so a single
+decision can land five times in as many seconds; those fold together, while a turn from the agent
+never does. Putting a version back is recorded as a change rather than by winding the list back,
+so nothing is lost by looking and undoing a restore is just restoring the other one.
+
+Twenty-five are kept, and the cap is re-imposed on the server — a limit only the browser honours
+isn't one. If the tab's storage runs short, history is given up oldest-first, because it is the
+only thing there that can be surrendered a piece at a time.
 
 ### 3MF
 

@@ -1,4 +1,5 @@
 import type { ObjectId } from "mongodb";
+import type { Version } from "./versions";
 
 /** One plain-language step explaining a piece of the model. */
 export interface BuildStep {
@@ -54,6 +55,14 @@ export interface CreationDoc {
   readme?: string;
   /** Set once the name and description are the person's own words, not the agent's. */
   titled?: boolean;
+  /**
+   * The build as it was, each time it changed. Absent on anything saved before history.
+   *
+   * Kept on the record rather than beside it: a history that didn't come back when the
+   * build was reopened would only cover the session that made it, which is the session
+   * least likely to need it.
+   */
+  versions?: Version[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +78,7 @@ export interface Creation {
   steps: BuildStep[];
   readme?: string;
   titled?: boolean;
+  versions?: Version[];
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +109,7 @@ export function toCreation(doc: CreationDoc): Creation {
     steps: doc.steps,
     readme: doc.readme,
     titled: doc.titled,
+    versions: doc.versions,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
