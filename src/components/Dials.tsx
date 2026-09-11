@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Sliders } from "@phosphor-icons/react";
+import { ColorDial } from "./ColorDial";
 import { Dropdown } from "./Dropdown";
 import { groupParameters, stepFor, type Parameter } from "@/lib/scadParameters";
 
@@ -15,10 +16,13 @@ import { groupParameters, stepFor, type Parameter } from "@/lib/scadParameters";
  */
 export function Dials({
   parameters,
+  colourNames,
   onChange,
   disabled,
 }: {
   parameters: Parameter[];
+  /** Which of them the program actually paints with, so those get the colours. */
+  colourNames?: string[];
   /** Writes the new value into the program. */
   onChange: (name: string, value: number | boolean | string) => void;
   disabled?: boolean;
@@ -55,6 +59,7 @@ export function Dials({
                 <Dial
                   key={parameter.name}
                   parameter={parameter}
+                  isColour={colourNames?.includes(parameter.name) ?? false}
                   onChange={onChange}
                   disabled={disabled}
                 />
@@ -69,13 +74,29 @@ export function Dials({
 
 function Dial({
   parameter,
+  isColour,
   onChange,
   disabled,
 }: {
   parameter: Parameter;
+  isColour: boolean;
   onChange: (name: string, value: number | boolean | string) => void;
   disabled?: boolean;
 }) {
+  // A setting the program paints with can be any colour a browser knows, so the handful
+  // listed beside it are suggestions rather than the menu.
+  if (isColour && typeof parameter.value === "string") {
+    return (
+      <ColorDial
+        label={parameter.label}
+        value={parameter.value}
+        suggested={(parameter.options ?? []).map((option) => String(option.value))}
+        onChange={(next) => onChange(parameter.name, next)}
+        disabled={disabled}
+      />
+    );
+  }
+
   if (parameter.kind === "boolean") {
     return (
       <label className="flex cursor-pointer items-center justify-between gap-3">

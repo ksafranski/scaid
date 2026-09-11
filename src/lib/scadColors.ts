@@ -169,6 +169,23 @@ export function requestedColors(code: string): RequestedColor[] {
   return found;
 }
 
+/**
+ * The names a program colours with.
+ *
+ * Which settings are colours, told by what the program does with them rather than by what
+ * they are called. A value is a colour because something is painted with it — `shade` and
+ * `body_tint` and `c` all qualify on the same evidence, and a setting called `colour_scheme`
+ * that nothing paints with does not.
+ */
+export function colourParameterNames(code: string): string[] {
+  const source = stripComments(code);
+  const names = new Set<string>();
+  for (const match of source.matchAll(/\bcolor\s*\(\s*([A-Za-z_]\w*)\s*[,)]/g)) {
+    names.add(match[1]);
+  }
+  return [...names];
+}
+
 /** Every color explicitly requested by color(...) calls, resolved to numbers. */
 export function extractRequestedColors(code: string): Color[] {
   const found: Color[] = [];

@@ -50,6 +50,7 @@ import { Dials } from "./Dials";
 import { parseParameters, setParameter } from "@/lib/scadParameters";
 import { turnSource } from "@/lib/geometry/orientation";
 import { export3mf } from "@/lib/export3mf";
+import { colourParameterNames } from "@/lib/scadColors";
 import {
   HAND_EDIT,
   measured as recordMeasurements,
@@ -720,6 +721,9 @@ export function Studio({
 
   // Held steady so the viewer isn't handed a new object on every render for a value that
   // only changes when the model does.
+  // Which settings are colours, told by what the program paints with rather than by name.
+  const colourNames = useMemo(() => colourParameterNames(design?.code ?? ""), [design?.code]);
+
   const snapTargets = useMemo(
     () => (mesh && metrics && !metrics.empty ? { vertices: mesh.vertices, lowestZ: metrics.lowestZ } : null),
     [mesh, metrics],
@@ -1218,7 +1222,12 @@ export function Studio({
             </div>
           ) : shownView === "dials" ? (
             <div className="flex min-h-0 flex-1 flex-col pt-3">
-              <Dials parameters={parameters} onChange={turnDial} disabled={working} />
+              <Dials
+                parameters={parameters}
+                colourNames={colourNames}
+                onChange={turnDial}
+                disabled={working}
+              />
             </div>
           ) : shownView === "readme" ? (
             <div className="flex min-h-0 flex-1 flex-col pt-3">

@@ -23,7 +23,8 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
   choice. The agent is told what its last build actually measured, so it works from the object
   rather than from what it meant to make.
 - **Turn the dials** — the sizes that matter come out as sliders. Drag one and the model
-  rebuilds, and the number changes in the code where you can see it.
+  rebuilds, and the number changes in the code where you can see it. A colour comes out as
+  every colour a browser knows, in a grid you pick from by looking.
 - **Then change it yourself** — switch the left panel to Code and edit directly. The model
   re-renders as you type, and only when the code actually compiles; errors point at the line.
 - **Say what it's for** — the Readme panel is a Markdown editor for the project itself: the
@@ -162,6 +163,12 @@ separately. It costs a little more work and removes a whole category of bug: the
 every number, so the code you read, the model you see, the STL you download and the program the
 agent is handed next turn cannot disagree about how tall it is. It also means you watch the number
 change in the code as you drag, which is most of the point — the dial teaches what it does.
+
+A setting the program *paints* with gets every colour a browser knows rather than the handful
+listed beside it — told by what the program does with the value, not by what it is called, so a
+setting holding "gold" for some other purpose stays a menu. The listed ones stay on top as
+suggestions, and the rest are sorted by hue so a grid of them reads as a spectrum: greys collect
+at the front and finding "a slightly deeper blue than that" is a matter of looking next to it.
 
 A dial that the program didn't give a step to moves in whole numbers when the program wrote whole
 numbers, because a count of grooves has no half. Anything written with a decimal point moves in
