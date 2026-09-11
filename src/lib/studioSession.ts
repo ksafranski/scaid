@@ -30,7 +30,7 @@ export interface StudioSnapshot {
   lastPrompt: string;
   /** The maker's own write-up. Absent on a session stored before readmes existed. */
   readme?: string;
-  view: "chat" | "code" | "readme";
+  view: "chat" | "code" | "dials" | "readme";
   saved: boolean;
 }
 

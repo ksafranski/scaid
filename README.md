@@ -17,6 +17,8 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
 - **Understand it** — every build comes with a step-by-step breakdown and the reasoning behind each
   choice. The agent is told what its last build actually measured, so it works from the object
   rather than from what it meant to make.
+- **Turn the dials** — the sizes that matter come out as sliders. Drag one and the model
+  rebuilds, and the number changes in the code where you can see it.
 - **Then change it yourself** — switch the left panel to Code and edit directly. The model
   re-renders as you type, and only when the code actually compiles; errors point at the line.
 - **Say what it's for** — the Readme panel is a Markdown editor for the project itself: the
@@ -130,6 +132,33 @@ without the library and renders both answers, for checking the claim rather than
 | `npm run verify:patterns thread` | Grade just the patterns whose id matches. |
 | `npm run ab:patterns "..."` | Ask the real agent the same thing with and without the library. |
 
+### Dials
+
+A model whose sizes are written into the middle of it can only be changed by rewriting it. So the
+agent is asked to name them at the top instead, with a range each, and `src/lib/scadParameters.ts`
+turns those into sliders:
+
+```openscad
+/* [Size] */
+height = 80;        // How tall it stands [40:200]
+wall = 2.5;         // Wall thickness [1:0.2:5]
+has_lid = true;     // Put a lid on it
+```
+
+That's OpenSCAD's own Customizer convention, not a Scaid dialect — open the downloaded file in the
+real OpenSCAD and the same controls are there.
+
+Moving a dial writes the number back into the program rather than passing it to the compiler
+separately. It costs a little more work and removes a whole category of bug: there is one copy of
+every number, so the code you read, the model you see, the STL you download and the program the
+agent is handed next turn cannot disagree about how tall it is. It also means you watch the number
+change in the code as you drag, which is most of the point — the dial teaches what it does.
+
+Only a number, `true`/`false`, or one of a listed set of strings is ever written. OpenSCAD parses
+these as expressions, so a value carrying a semicolon would be a second statement, and a value that
+isn't a number at all becomes `undef` and renders a silently wrong shape rather than an error.
+Both are refused before they reach the program.
+
 ### Measuring what came out
 
 A language model writes a program and never sees the solid it produced. So the studio measures
@@ -182,6 +211,7 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/app/api/design` | The design agent |
 | `src/lib/scadPatterns/` | The verified OpenSCAD technique library and its prompt injection |
 | `src/lib/geometry/` | Measuring the mesh, saying it in words, and cutting the model open |
+| `src/lib/scadParameters.ts`, `src/components/Dials.tsx` | The sizes at the top of a program, and the sliders they become |
 | `scripts/verify-geometry.mjs` | Grades the measurements against known solids — `npm run verify:geometry` |
 | `scripts/verify-patterns.mjs` | Grades every pattern against BOSL2 — `npm run verify:patterns` |
 | `scripts/lib/scad-render.mjs` | Renders and measures OpenSCAD in Node, using the browser's own wasm |

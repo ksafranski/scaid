@@ -107,7 +107,7 @@ function measure(off) {
  * Compiles a program and measures the solid it produced.
  *
  * @param {string} source OpenSCAD program.
- * @param {{ libraries?: string, includeOff?: boolean }} [options] `libraries` is a host
+ * @param {{ libraries?: string, includeOff?: boolean, defines?: string[] }} [options] `libraries` is a host
  *   directory to mount at /libraries, for reference programs that lean on BOSL2 — pattern
  *   code never gets one, that's the point. `includeOff` returns the raw mesh alongside the
  *   measurements, for a checker that wants to parse it the way the browser does.
@@ -142,6 +142,7 @@ export async function render(source, options = {}) {
       "/output.off",
       "--backend=manifold",
       "--export-format=off",
+      ...(options.defines ?? []).flatMap((define) => ["-D", define]),
     ]);
   } catch (error) {
     return { error: stderr.join("\n") || error.message };

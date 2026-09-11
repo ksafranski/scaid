@@ -22,6 +22,7 @@ const { estimateMaterial } = await import("../src/lib/geometry/materials.ts");
 const { sectionSource, sectionRange, defaultPosition, startingAxis } = await import(
   "../src/lib/geometry/section.ts"
 );
+const { parseParameters, setParameter } = await import("../src/lib/scadParameters.ts");
 
 const filter = process.argv[2];
 
@@ -332,6 +333,129 @@ translate([0, 0, 20]) post(3);`;
   }),
 ];
 
+/**
+ * The dials.
+ *
+ * Two things have to hold. What's read out of a program has to match what the program
+ * actually does — a slider labelled "wall" that doesn't change the wall is worse than no
+ * slider. And what's written back has to be the same program with one number different,
+ * which is checked by compiling it and measuring the result rather than by comparing text.
+ */
+const PARAMETERS = [
+  check("dials › the controls are read off the top of the program", async () => {
+    const program = `/* [Size] */
+height = 80;      // How tall it stands [40:200]
+diameter = 72;    // [30:150]
+wall = 2.5;       // Wall thickness [1:0.1:5]
+
+/* [Extras] */
+lid = true;       // Put a lid on it
+style = "round";  // [round, square]
+ribs = 12;
+
+$fn = 32;
+scratch = 5;
+cylinder(h = height, r = diameter / 2);`;
+
+    const found = parseParameters(program);
+    is(found.map((p) => p.name).join(","), "height,diameter,wall,lid,style,ribs", "names, in order");
+
+    const [height, diameter, wall, lid, style, ribs] = found;
+    is(height.label, "How tall it stands", "a stated label wins");
+    is(diameter.label, "Diameter", "a missing label is made from the name");
+    is(height.group, "Size", "the heading it sits under");
+    is(lid.group, "Extras", "the second heading");
+    near(wall.step, 0.1, 0, "the step out of a three-part range");
+    near(wall.min, 1, 0, "range low");
+    near(wall.max, 5, 0, "range high");
+    is(lid.kind, "boolean", "true/false is a switch");
+    is(style.kind, "option", "a list is a choice");
+    is(style.options.map((o) => o.label).join("/"), "round/square", "the choices");
+    is(ribs.kind, "number", "a number with no range still gets a control");
+    is(ribs.min, undefined, "...but no slider to drag");
+  }),
+
+  check("dials › nothing below the program's first real line becomes a control", async () => {
+    // `$fn` is a renderer setting, and `scratch` is working-out inside a module. Neither is
+    // a dimension of the object, and offering either as a dial would be a lie.
+    const found = parseParameters(`size = 10; // [1:20]
+$fn = 32;
+module thing() { scratch = 4; cube(scratch); }
+inner = 99;
+thing();`);
+    is(found.map((p) => p.name).join(","), "size", "only the one above the program");
+  }),
+
+  check("dials › a hidden section is left alone", async () => {
+    const found = parseParameters(`shown = 1; // [0:10]
+/* [Hidden] */
+secret = 2; // [0:10]`);
+    is(found.map((p) => p.name).join(","), "shown", "hidden stops the scan");
+  }),
+
+  check("dials › turning a dial changes the model and nothing else", async () => {
+    const program = `// A cup you can resize.
+height = 80;        // [40:200]
+diameter = 72;      // [30:150]
+wall = 2.5;         // [1:0.1:5]
+
+$fn = 32;
+difference() {
+  cylinder(h = height, r = diameter / 2);
+  translate([0, 0, 5]) cylinder(h = height, r = diameter / 2 - wall);
+}`;
+
+    const before = await inspect(program);
+    near(before.size.z, 80, 1e-9, "height as written");
+
+    const taller = setParameter(program, "height", 120);
+    const after = await inspect(taller);
+    near(after.size.z, 120, 1e-9, "height after the dial");
+    near(after.size.x, before.size.x, 1e-9, "width untouched");
+
+    // The rest of the file is byte-identical: only the one literal moved.
+    is(taller.replace("120", "80"), program, "one number changed, nothing else");
+
+    // A thicker wall is more material in the same outside shape.
+    const thicker = await inspect(setParameter(program, "wall", 4.25));
+    near(thicker.size.x, before.size.x, 1e-9, "outside unchanged by the wall");
+    if (!(thicker.volume > before.volume)) {
+      throw new Error(`thicker wall measured ${thicker.volume}, not more than ${before.volume}`);
+    }
+  }),
+
+  check("dials › a switch flips real geometry", async () => {
+    const program = `solid = false;
+$fn = 32;
+difference() {
+  cylinder(h = 40, r = 20);
+  if (!solid) translate([0, 0, 5]) cylinder(h = 40, r = 17);
+}`;
+    const hollow = await inspect(program);
+    const filled = await inspect(setParameter(program, "solid", true));
+    if (!(filled.volume > hollow.volume * 2)) {
+      throw new Error(`solid measured ${filled.volume}, hollow ${hollow.volume}`);
+    }
+  }),
+
+  check("dials › a value that isn't one is refused rather than compiled", async () => {
+    // The reason this gate exists: OpenSCAD parses these as expressions. A semicolon would
+    // be a second statement, and a word would become `undef` and render a wrong shape
+    // without ever reporting an error. Both are rejected before they reach the program.
+    const program = `height = 80; // [40:200]\nsolid = false;\ncube(height);`;
+    for (const bad of ["10; cube(500)", "abc", "1/0", "", "undef"]) {
+      is(setParameter(program, "height", bad), program, `refused ${JSON.stringify(bad)}`);
+    }
+    is(setParameter(program, "height", Number.NaN), program, "refused NaN");
+    is(setParameter(program, "height", Infinity), program, "refused Infinity");
+    is(setParameter(program, "nosuchdial", 5), program, "refused an unknown dial");
+
+    // And the shape that would have resulted from letting one through.
+    const injected = await inspect(`height = 10; cube(500);\ncube(height);`);
+    if (!(injected.size.x > 400)) throw new Error("the injection fixture didn't inject");
+  }),
+];
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -377,7 +501,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS]) {
   if (!item) continue;
   const started = Date.now();
   try {

@@ -13,6 +13,7 @@ import {
   FloppyDisk,
   ImageSquare,
   Notebook,
+  Sliders,
   PencilSimple,
   Plus,
   Prohibit,
@@ -42,6 +43,8 @@ import { clearSession, loadSession, saveSession } from "@/lib/studioSession";
 import { downloadBlob, renderStl, toFileName } from "@/lib/exportStl";
 import { DownloadMenu, ModelFacts, PlateSizePicker } from "./PrintControls";
 import { factProblem, toMeasured } from "@/lib/geometry/facts";
+import { Dials } from "./Dials";
+import { parseParameters, setParameter } from "@/lib/scadParameters";
 import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
@@ -208,7 +211,7 @@ export function Studio({
   const [activity, setActivity] = useState<Activity>(IDLE_ACTIVITY);
   /** What the code being edited is still missing, or null when it's ready to compile. */
   const [incomplete, setIncomplete] = useState<string | null>(null);
-  const [view, setView] = useState<"chat" | "code" | "readme">("chat");
+  const [view, setView] = useState<"chat" | "code" | "dials" | "readme">("chat");
   /**
    * The maker's own write-up of the project, in Markdown.
    *
@@ -608,7 +611,7 @@ export function Studio({
   // viewport only ever changes on valid code.
   const editTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function editCode(next: string) {
+  function editCode(next: string, immediate = false) {
     // Writing into an empty editor starts a build from nothing, so there's a design to hold
     // it. The agent overwrites all of this the moment it's asked to change anything.
     setDesign((prev) =>
@@ -631,7 +634,35 @@ export function Studio({
     setIncomplete(pending);
     if (pending) return;
 
+    // A dial was let go of, so there is nothing more to wait for — the pause only exists
+    // to stop a render firing between two keystrokes.
+    if (immediate) {
+      render(next);
+      return;
+    }
+
     editTimerRef.current = setTimeout(() => render(next), 500);
+  }
+
+  /**
+   * The controls the program declares at the top of itself.
+   *
+   * Read from the code every time rather than held alongside it, so they can never drift
+   * out of step with it — an edit in the code panel moves the dials, and moving a dial
+   * writes the number back into the code.
+   */
+  const parameters = useMemo(() => parseParameters(design?.code ?? ""), [design?.code]);
+
+  // A rebuild can take the controls away while their panel is open. Working out which
+  // panel to show, rather than correcting the stored one afterwards, means there's never
+  // a frame where the dials tab is selected and empty.
+  const shownView = view === "dials" && parameters.length === 0 ? "chat" : view;
+
+  function turnDial(name: string, value: number | boolean | string) {
+    const current = design?.code;
+    if (!current) return;
+    const next = setParameter(current, name, value);
+    if (next !== current) editCode(next, true);
   }
 
   useEffect(() => () => {
@@ -886,13 +917,18 @@ export function Studio({
       {/* One toolbar for the workspace: what's on the left, and what you can do with it. */}
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-850 px-4 py-2.5">
         <div className="flex gap-1 rounded-xl bg-ink-900 p-1">
-          <ViewButton active={view === "chat"} onClick={() => setView("chat")} Glyph={ChatCircleDots}>
+          <ViewButton active={shownView === "chat"} onClick={() => setView("chat")} Glyph={ChatCircleDots}>
             Chat
           </ViewButton>
-          <ViewButton active={view === "code"} onClick={() => setView("code")} Glyph={Code}>
+          <ViewButton active={shownView === "code"} onClick={() => setView("code")} Glyph={Code}>
             Code
           </ViewButton>
-          <ViewButton active={view === "readme"} onClick={() => setView("readme")} Glyph={Notebook}>
+          {parameters.length > 0 && (
+            <ViewButton active={shownView === "dials"} onClick={() => setView("dials")} Glyph={Sliders}>
+              Dials
+            </ViewButton>
+          )}
+          <ViewButton active={shownView === "readme"} onClick={() => setView("readme")} Glyph={Notebook}>
             Readme
           </ViewButton>
         </div>
@@ -989,7 +1025,7 @@ export function Studio({
       >
         {/* Left panel: the conversation, the code you can edit, or your write-up */}
         <section className="relative flex min-h-0 flex-col border-ink-700 bg-ink-850 lg:border-r">
-          {view === "code" ? (
+          {shownView === "code" ? (
             <div className="flex min-h-0 flex-1 flex-col pt-3">
               <CodeEditor
                 code={design?.code ?? ""}
@@ -999,7 +1035,11 @@ export function Studio({
                 incomplete={incomplete}
               />
             </div>
-          ) : view === "readme" ? (
+          ) : shownView === "dials" ? (
+            <div className="flex min-h-0 flex-1 flex-col pt-3">
+              <Dials parameters={parameters} onChange={turnDial} disabled={working} />
+            </div>
+          ) : shownView === "readme" ? (
             <div className="flex min-h-0 flex-1 flex-col pt-3">
               <ReadmeEditor readme={readme} onChange={editReadme} />
             </div>
