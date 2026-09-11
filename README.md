@@ -13,6 +13,8 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
   plate. Readings stay on the model while you turn it.
 - **Cut it open** — slice the model across X, Y or Z and slide the cut through it. The ruler
   still works on the exposed face, so measuring a wall's thickness is one drag.
+- **Print it the right way up** — when turning it over would save support, the studio says so
+  and offers to turn it. It builds the turned version to check before it tells you.
 - **Know what it weighs** — click the size in the toolbar for what the model actually measures:
   volume, weight and filament if it were printed solid, how much of it overhangs, what it
   stands on, and whether it balances. Taken off the mesh, so the numbers are checkable.
@@ -189,6 +191,27 @@ that fires on half of all builds is one people stop reading.
 the smooth one. Surface defects can't be produced by OpenSCAD — its manifold backend always emits
 a closed solid — so those checks break a known-good mesh by hand and confirm each one is caught.
 
+### Which way up to print it
+
+Orientation decides whether a print succeeds more than almost anything else, and it's the one
+decision a beginner has no reason to know exists. `src/lib/geometry/orientation.ts` measures the
+six ways of setting a model down square — there are twenty-four, but eighteen are these six spun
+about the vertical, which changes nothing about what rests on the plate or hangs over it.
+
+Judging a stance is a pass over a mesh already in memory, not another compile: turn the vertices,
+measure again. That was checked against the real thing rather than assumed, and it agrees exactly
+— until a face lands on the 45° line, where the last bit of floating point decides which side it
+falls and the two answers differ by a factor of two. A chamfer cut at the steepest safe angle *is*
+a face at exactly 45°, so this is common rather than exotic.
+
+So the search is a shortlist, never an answer. The stance at the top of it is compiled and
+measured before anyone is told about it, and if the build disagrees, the build wins. Nothing is
+said at all unless the saving survives that — or unless it's worth a third of the support or more,
+because interrupting someone for a few percent teaches them to stop reading. Nor is a stance
+offered that balances the model on a corner or tips it over, however little support it would need.
+
+Accepting it writes a `rotate()` into the program, where it can be read, kept and undone.
+
 ### Cutting it open
 
 The measurement people most want is wall thickness, and it's the one the studio deliberately
@@ -217,7 +240,7 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | --- | --- |
 | `src/app/api/design` | The design agent |
 | `src/lib/scadPatterns/` | The verified OpenSCAD technique library and its prompt injection |
-| `src/lib/geometry/` | Measuring the mesh, saying it in words, and cutting the model open |
+| `src/lib/geometry/` | Measuring the mesh, saying it in words, cutting it open and setting it down the right way up |
 | `src/lib/scadParameters.ts`, `src/components/Dials.tsx` | The sizes at the top of a program, and the sliders they become |
 | `src/lib/designSchema.ts` | The response fields that correct a model rather than reject it |
 | `scripts/verify-geometry.mjs` | Grades the measurements against known solids — `npm run verify:geometry` |

@@ -6,15 +6,45 @@ import type { IndexedPolyhedron } from "@/io/common";
 import { exportGlb } from "@/io/export_glb";
 import { friendlyError } from "@/lib/friendlyErrors";
 import { extractRequestedColors } from "@/lib/scadColors";
-import { inspectMesh, type GeometryReport } from "@/lib/geometry/inspect";
+import { inspectMesh, measureOnPlate, type GeometryReport } from "@/lib/geometry/inspect";
+import {
+  STANCES,
+  betterStance,
+  stances,
+  turnSource,
+  type Turn,
+} from "@/lib/geometry/orientation";
+import { renderOnce } from "@/lib/renderOnce";
 import { sectionSource, type Section } from "@/lib/geometry/section";
 import type { Bounds } from "@/lib/geometry/inspect";
+
+/** Said out loud, by the turn that produces it. */
+const STANCE_NAMES = new Map(STANCES.map((stance) => [stance.turn.join(","), stance.name]));
 
 /** Outside dimensions of the model in millimeters — what you'd measure with calipers. */
 export interface ModelSize {
   x: number;
   y: number;
   z: number;
+}
+
+/**
+ * A way of setting the model down that would print better, confirmed by building it.
+ *
+ * Never a prediction. Turning the mesh is how the candidates are found, and it agrees with
+ * a real build everywhere except on the 45-degree line — so the one that wins gets compiled
+ * before anyone is told it won.
+ */
+export interface OrientationAdvice {
+  turn: Turn;
+  /** "on its back" — how to say it in a sentence. */
+  name: string;
+  /** Square millimeters needing support once turned. Measured, not guessed. */
+  overhangArea: number;
+  /** And as it stands now, to compare against. */
+  currentOverhangArea: number;
+  height: number;
+  currentHeight: number;
 }
 
 export interface RenderState {
@@ -31,6 +61,8 @@ export interface RenderState {
   metrics: GeometryReport | null;
   /** The cut currently being looked through, or null for the whole model. */
   section: Section | null;
+  /** A better way up, when there is one worth the interruption. */
+  advice: OrientationAdvice | null;
 }
 
 /**
@@ -56,6 +88,7 @@ export function useScadRenderer(plateSizeMm: number) {
     size: null,
     metrics: null,
     section: null,
+    advice: null,
   });
 
   /**
@@ -150,7 +183,22 @@ export function useScadRenderer(plateSizeMm: number) {
             ...prev,
             metrics,
             size: metrics.empty ? null : metrics.size,
+            advice: null, // whatever was advised was about the model before this one
           }));
+
+          // Looking for a better way up is a handful of passes over a mesh already in
+          // memory, so it costs about what measuring did. Confirming one costs a build, so
+          // that only happens when there is something worth confirming — which is a
+          // minority of models, and never on the path to seeing this one.
+          const source = request?.code;
+          if (metrics.empty || !source) return;
+          const candidate = betterStance(stances(polyhedron, metrics.area, metrics.centroid));
+          if (!candidate) return;
+
+          void confirmStance(source, candidate.turn, metrics).then((advice) => {
+            if (!advice || requestId !== latestRequestRef.current) return;
+            setState((prev) => ({ ...prev, advice }));
+          });
         }, 0);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -226,6 +274,7 @@ export function useScadRenderer(plateSizeMm: number) {
       size: null,
       metrics: null,
       section: null,
+      advice: null,
     });
   }, []);
 
@@ -294,6 +343,44 @@ interface RenderRequest {
   section: Section | null;
   /** The whole model's extents, which is what the cutting box is sized against. */
   bounds: Bounds | null;
+}
+
+/**
+ * Builds the model the suggested way up and measures what actually came out.
+ *
+ * The step that turns a shortlist into advice. If the build disagrees with the prediction —
+ * which it will whenever the difference was made of faces sitting on the threshold — the
+ * build wins, and if it no longer looks better, nothing is said at all. Silence is the
+ * right outcome here far more often than a correction would be.
+ */
+async function confirmStance(
+  code: string,
+  turn: Turn,
+  metrics: GeometryReport,
+): Promise<OrientationAdvice | null> {
+  let turned;
+  try {
+    const off = await renderOnce(turnSource(code, turn), "off");
+    turned = parseOff(off);
+  } catch {
+    return null; // it didn't build turned, so it isn't advice
+  }
+
+  const measured = measureOnPlate(turned.vertices, turned.faces, metrics.area, null);
+  const current = metrics.overhang.area;
+  const better = measured.overhang.area;
+
+  const worthIt = current > 0 && (better === 0 || (current - better) / current >= 1 / 3);
+  if (!worthIt) return null;
+
+  return {
+    turn,
+    name: STANCE_NAMES.get(turn.join(",")) ?? "another way up",
+    overhangArea: better,
+    currentOverhangArea: current,
+    height: measured.size.z,
+    currentHeight: metrics.size.z,
+  };
 }
 
 /** What actually gets compiled: the program, or the program with a slice taken out of it. */

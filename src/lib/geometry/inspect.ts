@@ -26,6 +26,9 @@ export const OVERHANG_THRESHOLD_DEG = 45;
  */
 export const CONTACT_EPS_MM = 0.01;
 
+/** How close to the threshold counts as too close to call. */
+export const THRESHOLD_DOUBT_DEG = 1;
+
 /**
  * Above this, the edge check is skipped rather than run.
  *
@@ -64,6 +67,15 @@ export interface Overhang {
   /** The height band the steep faces live in, so "where" has an answer. */
   lowZ: number;
   highZ: number;
+  /**
+   * Surface lying within a hair of the threshold, where the answer is a coin toss.
+   *
+   * A face at exactly 45 degrees is counted or not by the last bit of its arithmetic, and
+   * a chamfer cut at the steepest safe angle is a face at exactly 45 degrees — so this is
+   * common rather than exotic. Anything comparing two orientations has to know when the
+   * difference between them is made of these.
+   */
+  nearThresholdArea: number;
 }
 
 export interface Bed {
@@ -140,7 +152,15 @@ const EMPTY_REPORT: GeometryReport = {
     inverted: false,
     skipped: false,
   },
-  overhang: { thresholdDeg: OVERHANG_THRESHOLD_DEG, area: 0, fraction: 0, steepestDeg: 0, lowZ: 0, highZ: 0 },
+  overhang: {
+    thresholdDeg: OVERHANG_THRESHOLD_DEG,
+    area: 0,
+    fraction: 0,
+    steepestDeg: 0,
+    lowZ: 0,
+    highZ: 0,
+    nearThresholdArea: 0,
+  },
   bed: {
     contactArea: 0,
     footprint: [],
@@ -174,8 +194,6 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
   const oy = (minY + maxY) / 2;
   const oz = (minZ + maxZ) / 2;
 
-  const contactCeiling = minZ + CONTACT_EPS_MM;
-
   // Measured from the middle of the box rather than from the centre of mass, so it stays
   // the same when the inside of the model changes and the outside doesn't.
   let boundingRadius = 0;
@@ -187,12 +205,6 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
   let area = 0;
   let sixVolume = 0;
   let cnx = 0, cny = 0, cnz = 0;
-
-  let overhangArea = 0;
-  let steepestDeg = 0;
-  let overhangLowZ = Infinity;
-  let overhangHighZ = -Infinity;
-  let contactArea = 0;
 
   for (const face of faces) {
     const [ia, ib, ic] = face.vertices;
@@ -208,8 +220,7 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
     // out of the one cross product.
     const nx = aby * acz - abz * acy;
     const ny = abz * acx - abx * acz;
-    const nz = abx * acy - aby * acx;
-    const twiceArea = Math.hypot(nx, ny, nz);
+    const twiceArea = Math.hypot(nx, ny, abx * acy - aby * acx);
 
     // A degenerate triangle has no area, no direction, and normalizing it would produce
     // NaN that poisons every sum it touches. It contributes nothing to any of them.
@@ -233,26 +244,6 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
     cny += det * (ay + by + cy);
     cnz += det * (az + bz + cz);
 
-    const highestZ = Math.max(a.z, b.z, c.z);
-    const lowestFaceZ = Math.min(a.z, b.z, c.z);
-
-    // A face lying flat on the plate is resting on it, not hanging over anything. Without
-    // this every model reports that it needs support, because of its own base.
-    if (highestZ <= contactCeiling) {
-      contactArea += faceArea;
-      continue;
-    }
-
-    // Slicer convention: measured from vertical, so a wall is 0 and a ceiling is 90.
-    const unitNz = nz / twiceArea;
-    if (unitNz >= 0) continue;
-    const angle = (Math.asin(Math.min(1, -unitNz)) * 180) / Math.PI;
-    if (angle > steepestDeg) steepestDeg = angle;
-    if (angle > OVERHANG_THRESHOLD_DEG) {
-      overhangArea += faceArea;
-      if (lowestFaceZ < overhangLowZ) overhangLowZ = lowestFaceZ;
-      if (highestZ > overhangHighZ) overhangHighZ = highestZ;
-    }
   }
 
   const volume = Math.abs(sixVolume) / 6;
@@ -270,28 +261,118 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
   watertight.inverted = sixVolume < 0;
   watertight.ok = watertight.ok && !watertight.inverted;
 
-  const bed = measureBed(vertices, contactCeiling, contactArea, centroid, minZ);
+  const onPlate = measureOnPlate(vertices, faces, area, centroid);
 
   return {
     triangles: faces.length,
-    size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
+    size: onPlate.size,
     bounds: { min: { x: minX, y: minY, z: minZ }, max: { x: maxX, y: maxY, z: maxZ } },
     boundingRadius,
-    lowestZ: minZ,
+    lowestZ: onPlate.lowestZ,
     volume,
     area,
     centroid,
     watertight,
+    overhang: onPlate.overhang,
+    bed: onPlate.bed,
+    empty: false,
+  };
+}
+
+/**
+ * Everything about a model that changes when you turn it over.
+ *
+ * Split out from the rest because it is exactly the half an orientation advisor needs to
+ * ask about again. Volume, surface area and whether the surface closes are the same
+ * however the thing is set down; what rests on the plate, what hangs over it and how tall
+ * it stands are not. Sharing the code means a stance can never be judged by slightly
+ * different arithmetic from the one being judged against.
+ */
+export interface PlateMeasurements {
+  size: { x: number; y: number; z: number };
+  lowestZ: number;
+  overhang: Overhang;
+  bed: Bed;
+}
+
+export function measureOnPlate(
+  vertices: Vertex[],
+  faces: IndexedPolyhedron["faces"],
+  totalArea: number,
+  centroid: { x: number; y: number; z: number } | null,
+): PlateMeasurements {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const v of vertices) {
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+    if (v.z < minZ) minZ = v.z;
+    if (v.z > maxZ) maxZ = v.z;
+  }
+
+  const contactCeiling = minZ + CONTACT_EPS_MM;
+
+  let overhangArea = 0;
+  let steepestDeg = 0;
+  let overhangLowZ = Infinity;
+  let overhangHighZ = -Infinity;
+  let contactArea = 0;
+  let nearThreshold = 0;
+
+  for (const face of faces) {
+    const [ia, ib, ic] = face.vertices;
+    const a = vertices[ia];
+    const b = vertices[ib];
+    const c = vertices[ic];
+    if (!a || !b || !c) continue;
+
+    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+    const acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    const twiceArea = Math.hypot(nx, ny, nz);
+    if (twiceArea === 0) continue;
+
+    const faceArea = twiceArea / 2;
+    const highestZ = Math.max(a.z, b.z, c.z);
+    const lowestFaceZ = Math.min(a.z, b.z, c.z);
+
+    // A face lying flat on the plate is resting on it, not hanging over anything. Without
+    // this every model reports that it needs support, because of its own base.
+    if (highestZ <= contactCeiling) {
+      contactArea += faceArea;
+      continue;
+    }
+
+    // Slicer convention: measured from vertical, so a wall is 0 and a ceiling is 90.
+    const unitNz = nz / twiceArea;
+    if (unitNz >= 0) continue;
+    const angle = (Math.asin(Math.min(1, -unitNz)) * 180) / Math.PI;
+    if (angle > steepestDeg) steepestDeg = angle;
+    if (Math.abs(angle - OVERHANG_THRESHOLD_DEG) <= THRESHOLD_DOUBT_DEG) nearThreshold += faceArea;
+    if (angle > OVERHANG_THRESHOLD_DEG) {
+      overhangArea += faceArea;
+      if (lowestFaceZ < overhangLowZ) overhangLowZ = lowestFaceZ;
+      if (highestZ > overhangHighZ) overhangHighZ = highestZ;
+    }
+  }
+
+  return {
+    size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
+    lowestZ: minZ,
     overhang: {
       thresholdDeg: OVERHANG_THRESHOLD_DEG,
       area: overhangArea,
-      fraction: area > 0 ? overhangArea / area : 0,
+      fraction: totalArea > 0 ? overhangArea / totalArea : 0,
       steepestDeg,
       lowZ: overhangLowZ === Infinity ? 0 : overhangLowZ,
       highZ: overhangHighZ === -Infinity ? 0 : overhangHighZ,
+      nearThresholdArea: nearThreshold,
     },
-    bed,
-    empty: false,
+    bed: measureBed(vertices, contactCeiling, contactArea, centroid, minZ),
   };
 }
 

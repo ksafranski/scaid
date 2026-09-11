@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowsClockwise,
   Blueprint,
   CaretDown,
   CodeBlock,
@@ -17,7 +18,7 @@ import { WorkingText } from "./Working";
 import { MAX_PLATE_MM, MIN_PLATE_MM, PLATE_PRESETS } from "@/lib/types";
 import { factRows } from "@/lib/geometry/facts";
 import type { GeometryReport } from "@/lib/geometry/inspect";
-import type { ModelSize } from "@/hooks/useScadRenderer";
+import type { ModelSize, OrientationAdvice } from "@/hooks/useScadRenderer";
 
 const CUSTOM = "custom";
 
@@ -113,10 +114,15 @@ export function ModelFacts({
   size,
   plateSizeMm,
   metrics,
+  advice,
+  onTurn,
 }: {
   size: ModelSize;
   plateSizeMm: number;
   metrics: GeometryReport | null;
+  /** A better way up, once one has been found and built to check. */
+  advice?: OrientationAdvice | null;
+  onTurn?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -214,6 +220,40 @@ export function ModelFacts({
               </div>
             ))}
           </dl>
+
+          {/* Sits under the overhang figure it's about, because it is the answer to it. */}
+          {advice && onTurn && (
+            <div className="mt-1 rounded-lg bg-ink-800 p-3">
+              <p className="text-xs leading-relaxed text-mist-200">
+                Printed <span className="font-semibold">{advice.name}</span> it needs{" "}
+                {advice.overhangArea === 0 ? (
+                  <span className="font-semibold text-emerald-400">no support at all</span>
+                ) : (
+                  <>
+                    support over{" "}
+                    <span className="font-semibold">{Math.round(advice.overhangArea)} mm²</span>{" "}
+                    instead of {Math.round(advice.currentOverhangArea)}
+                  </>
+                )}
+                {advice.height < advice.currentHeight - 0.5 && (
+                  <>
+                    , and it stands {Math.round(advice.currentHeight - advice.height)} mm shorter
+                  </>
+                )}
+                .
+              </p>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onTurn();
+                }}
+                className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-ink-600 px-2.5 py-1.5 text-xs font-semibold text-mist-200 transition hover:bg-ink-700 hover:text-mist-100"
+              >
+                <ArrowsClockwise size={14} weight="bold" />
+                Turn it that way
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

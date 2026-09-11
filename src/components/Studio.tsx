@@ -46,6 +46,7 @@ import { DownloadMenu, ModelFacts, PlateSizePicker } from "./PrintControls";
 import { factProblem, toMeasured } from "@/lib/geometry/facts";
 import { Dials } from "./Dials";
 import { parseParameters, setParameter } from "@/lib/scadParameters";
+import { turnSource } from "@/lib/geometry/orientation";
 import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import {
@@ -199,6 +200,7 @@ export function Studio({
     size,
     metrics,
     section,
+    advice,
     render,
     reset,
     setSection,
@@ -675,6 +677,18 @@ export function Studio({
   // a frame where the dials tab is selected and empty.
   const shownView = view === "dials" && parameters.length === 0 ? "chat" : view;
 
+  /**
+   * Sets the model down the way the advice suggests.
+   *
+   * Written into the program rather than applied to the view, so it is a change to the
+   * object they can see, keep, undo and download — not a setting hiding somewhere.
+   */
+  function turnModel() {
+    const current = design?.code;
+    if (!current || !advice) return;
+    editCode(turnSource(current, advice.turn), true);
+  }
+
   function turnDial(name: string, value: number | boolean | string) {
     const current = design?.code;
     if (!current) return;
@@ -980,7 +994,13 @@ export function Studio({
         <div className="ml-auto flex items-center gap-3">
           {size && (
             <>
-              <ModelFacts size={size} plateSizeMm={plateSizeMm} metrics={metrics} />
+              <ModelFacts
+                size={size}
+                plateSizeMm={plateSizeMm}
+                metrics={metrics}
+                advice={advice}
+                onTurn={turnModel}
+              />
               <span aria-hidden className="h-5 w-px bg-ink-700" />
             </>
           )}

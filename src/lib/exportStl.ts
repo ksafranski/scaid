@@ -1,40 +1,10 @@
 "use client";
 
-/**
- * Renders OpenSCAD source to a binary STL for download.
- *
- * Runs in its own short-lived worker rather than sharing the preview's: an export must never
- * be dropped as "stale" the way a superseded preview render is, and the two shouldn't
- * queue behind each other.
- */
-const TIMEOUT_MS = 120_000;
+import { renderOnce } from "./renderOnce";
 
+/** Renders OpenSCAD source to a binary STL for download. */
 export function renderStl(code: string): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker("/openscad-worker.js", { type: "module" });
-
-    const finish = (action: () => void) => {
-      clearTimeout(timer);
-      worker.terminate();
-      action();
-    };
-
-    const timer = setTimeout(
-      () => finish(() => reject(new Error("The model took too long to export."))),
-      TIMEOUT_MS,
-    );
-
-    worker.onmessage = (event: MessageEvent) => {
-      const { stl, error } = event.data ?? {};
-      if (error) finish(() => reject(new Error(error)));
-      else if (stl) finish(() => resolve(stl as Uint8Array));
-      else finish(() => reject(new Error("The export came back empty.")));
-    };
-
-    worker.onerror = (event) => finish(() => reject(new Error(event.message)));
-
-    worker.postMessage({ code, requestId: 1, format: "binstl" });
-  });
+  return renderOnce(code, "binstl");
 }
 
 /** Turns a build name into something safe to save to disk, without an extension. */

@@ -23,6 +23,7 @@ const { sectionSource, sectionRange, defaultPosition, startingAxis } = await imp
   "../src/lib/geometry/section.ts"
 );
 const { parseParameters, setParameter, stepFor } = await import("../src/lib/scadParameters.ts");
+const { stances, betterStance, turnSource, STANCES } = await import("../src/lib/geometry/orientation.ts");
 
 const filter = process.argv[2];
 
@@ -493,6 +494,91 @@ span = 400;       // A long way [0:1000]`);
   }),
 ];
 
+/**
+ * Which way up to print it.
+ *
+ * The one that has to hold: judging a stance by turning the mesh has to agree with
+ * turning the model and compiling it. Where it doesn't, the advisor is reading a shape
+ * nobody is going to print.
+ */
+const ORIENTATION = [
+  check("stance › turning the mesh agrees with turning the model", async () => {
+    // A mushroom: a flat cap on a thin stem, so its underside is a large, unambiguous
+    // overhang that changes completely depending on which way up it goes.
+    const program = `$fn = 48;
+union() {
+  cylinder(h = 40, r = 8);
+  translate([0, 0, 40]) cylinder(h = 6, r = 26);
+}`;
+    const upright = await inspect(program);
+    const predicted = stances(parseOff((await render(program, { includeOff: true })).off), upright.area, upright.centroid);
+
+    for (const stance of predicted) {
+      const compiled = await inspect(
+        `rotate([${stance.turn.join(", ")}]) {\n${program}\n}`,
+      );
+      const label = `[${stance.turn.join(",")}]`;
+      // A reading the module itself calls borderline is one it has already disowned.
+      if (stance.borderline) continue;
+      near(stance.overhangArea, compiled.overhang.area, relative(Math.max(compiled.overhang.area, 1)) + 0.01, `${label} overhang`);
+      near(stance.contactArea, compiled.bed.contactArea, relative(Math.max(compiled.bed.contactArea, 1)) + 0.01, `${label} contact`);
+      near(stance.height, compiled.size.z, 1e-6, `${label} height`);
+    }
+  }),
+
+  check("stance › the advice is to turn the mushroom over", async () => {
+    const program = `$fn = 48;
+union() {
+  cylinder(h = 40, r = 8);
+  translate([0, 0, 40]) cylinder(h = 6, r = 26);
+}`;
+    const upright = await inspect(program);
+    const all = stances(parseOff((await render(program, { includeOff: true })).off), upright.area, upright.centroid);
+    const advice = betterStance(all);
+    if (!advice) throw new Error("nothing suggested for a cap on a stem, which is the easy case");
+
+    // And the advice has to survive being compiled, which is the whole point of confirming.
+    const turned = await inspect(turnSource(program, advice.turn));
+    if (!(turned.overhang.area < upright.overhang.area * 0.67)) {
+      throw new Error(
+        `turned it still has ${turned.overhang.area.toFixed(0)}mm² against ${upright.overhang.area.toFixed(0)}mm²`,
+      );
+    }
+    near(turned.volume, upright.volume, relative(upright.volume), "turning it changes nothing but which way it faces");
+  }),
+
+  check("stance › a cube is never told to turn", async () => {
+    // Every way up is the same way up. Advice here would be noise with a number on it.
+    const cube = await inspect("cube(20);");
+    const all = stances(parseOff((await render("cube(20);", { includeOff: true })).off), cube.area, cube.centroid);
+    is(betterStance(all), null, "advice for a cube");
+    for (const stance of all) near(stance.height, 20, 1e-6, `height ${stance.turn.join(",")}`);
+  }),
+
+  check("stance › nothing is suggested that would fall over or stand on a point", async () => {
+    // A tall spike: lying down removes every overhang, but it is the standing-up case that
+    // must never be offered — and neither may anything balanced on a corner.
+    const program = "$fn = 32; cylinder(h = 90, r1 = 20, r2 = 2);";
+    const base = await inspect(program);
+    const all = stances(parseOff((await render(program, { includeOff: true })).off), base.area, base.centroid);
+    const advice = betterStance(all);
+    if (advice) {
+      const turned = await inspect(turnSource(program, advice.turn));
+      if (turned.bed.contactArea < 25) throw new Error("suggested a stance that stands on almost nothing");
+      if (turned.bed.tipMargin !== null && turned.bed.tipMargin <= 0) {
+        throw new Error("suggested a stance that topples");
+      }
+    }
+  }),
+
+  check("stance › the six are the six, and each is a real turn", async () => {
+    is(STANCES.length, 6, "how many ways to set it down square");
+    const seen = new Set(STANCES.map((s) => s.turn.join(",")));
+    is(seen.size, 6, "no two the same");
+    is(STANCES[0].turn.join(","), "0,0,0", "the first is the one they already have");
+  }),
+];
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -538,7 +624,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION]) {
   if (!item) continue;
   const started = Date.now();
   try {
