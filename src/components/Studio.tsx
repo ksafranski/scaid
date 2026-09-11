@@ -6,7 +6,6 @@ import {
   CaretUp,
   ChatCircleDots,
   Check,
-  CircleNotch,
   CheckCircle,
   Circle,
   Code,
@@ -24,6 +23,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { ModelViewer } from "./ModelViewer";
+import { WorkingOverlay, WorkingText } from "./Working";
 import { TopBar } from "./TopBar";
 import { CodeEditor } from "./CodeEditor";
 import { ReadmeEditor } from "./ReadmeEditor";
@@ -935,7 +935,7 @@ export function Studio({
                     Saved
                   </>
                 ) : saveState === "saving" ? (
-                  "Saving…"
+                  <WorkingText>Saving…</WorkingText>
                 ) : (
                   <>
                     <FloppyDisk size={16} weight="duotone" />
@@ -1128,14 +1128,7 @@ export function Studio({
             snapshotRef={snapshotRef}
           />
 
-          {isRendering && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-850/90 px-5 py-3 text-sm font-medium text-mist-300 backdrop-blur">
-                <CircleNotch size={16} weight="bold" className="animate-spin text-volt-300" />
-                Building the model…
-              </div>
-            </div>
-          )}
+          {isRendering && <WorkingOverlay label="Building the model…" />}
 
           {/* While editing, the inline status in the toolbar carries the error instead — a
               banner over the model would cover the thing you're trying to fix. */}

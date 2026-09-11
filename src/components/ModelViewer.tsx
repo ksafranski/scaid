@@ -5,7 +5,6 @@ import {
   ArrowCounterClockwise,
   ArrowUpRight,
   ArrowUUpLeft,
-  CircleNotch,
   Cube,
   Lasso,
   Ruler,
@@ -13,6 +12,7 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
+import { WorkingLine, WorkingOverlay } from "./Working";
 import { MARKUP_COLOR, REGION_FILL, renderMarkup, type Mark, type MarkPoint } from "@/lib/markup";
 import {
   MEASURE_COLOR,
@@ -551,9 +551,8 @@ export function ModelViewer({
 
   if (!ready) {
     return (
-      <div className="flex h-full items-center justify-center gap-2.5 text-sm text-mist-500">
-        <CircleNotch size={16} weight="bold" className="animate-spin text-volt-300" />
-        Warming up…
+      <div className="flex h-full items-center justify-center">
+        <WorkingLine label="Warming up…" />
       </div>
     );
   }
@@ -859,12 +858,7 @@ export function ModelViewer({
       )}
 
       {src && !modelShown && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-850/90 px-5 py-3 text-sm font-medium text-mist-300 backdrop-blur">
-            <CircleNotch size={16} weight="bold" className="animate-spin text-volt-300" />
-            Almost ready…
-          </div>
-        </div>
+        <WorkingOverlay label="Almost ready…" />
       )}
 
       {!src && !spinning && (

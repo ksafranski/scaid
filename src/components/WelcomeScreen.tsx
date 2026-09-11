@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Cube, Path, Printer } from "@phosphor-icons/react";
 import { Logo } from "./Logo";
+import { WorkingText } from "./Working";
 
 const EXAMPLES = [
   { Glyph: Cube, text: "a phone stand that holds it at an angle" },
@@ -135,12 +136,27 @@ export function WelcomeScreen() {
               </p>
             )}
 
+            {/*
+              While it's working the fill comes off, the way the studio's save button does.
+              The sweep is a light gradient and washes out to nothing on volt-500, and a
+              filled button that can't be pressed reads as an action anyway.
+            */}
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-xl bg-volt-500 px-6 py-3.5 font-semibold text-white transition hover:bg-volt-600 disabled:opacity-50"
+              className={`w-full rounded-xl px-6 py-3.5 font-semibold transition ${
+                busy
+                  ? "border border-ink-700"
+                  : "bg-volt-500 text-white hover:bg-volt-600"
+              }`}
             >
-              {busy ? "One moment…" : isSignup ? "Create account" : "Sign in"}
+              {busy ? (
+                <WorkingText>One moment…</WorkingText>
+              ) : isSignup ? (
+                "Create account"
+              ) : (
+                "Sign in"
+              )}
             </button>
           </form>
         </div>

@@ -13,6 +13,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { Dropdown, type DropdownOption } from "./Dropdown";
+import { WorkingText } from "./Working";
 import { MAX_PLATE_MM, MIN_PLATE_MM, PLATE_PRESETS } from "@/lib/types";
 import type { ModelSize } from "@/hooks/useScadRenderer";
 
@@ -170,7 +171,7 @@ export function DownloadMenu({
         className="flex items-center gap-1.5 rounded-xl border border-ink-700 px-3.5 py-2 text-sm font-semibold text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100 disabled:opacity-60"
       >
         <DownloadSimple size={16} weight="duotone" className="text-emerald-400" />
-        {busy ? "Exporting…" : "Download"}
+        {busy ? <WorkingText>Exporting…</WorkingText> : "Download"}
         <CaretDown size={12} weight="bold" />
       </button>
 
