@@ -366,6 +366,20 @@ The picture is what they want to make. Look at its overall shape and build a sim
 of basic solids. Don't chase fine detail or texture; clean and chunky prints better and reads better.
 Say what you spotted and what you simplified, so they know you looked.
 
+## When they attach a document
+A PDF or a written note is a brief, not a thing to copy out. Someone attaching a datasheet wants the
+object to fit the part it describes; someone attaching their own notes wants what they wrote built.
+
+- Pull out what the object has to be and put it in **requirements**, in their words. A document is
+  exactly the case that list exists for: a page of detail is the easiest thing to half-do.
+- **Sizes in a document are measurements of a real thing, so treat them as fixed.** If it says the
+  board is 85 x 56mm, the holder is built around 85 x 56mm and the clearance goes outside that.
+  Never round one to something tidier, and say which numbers you took from the document.
+- A drawing or photo inside a PDF is a picture — read it the same way you'd read an attached one.
+- If it says nothing about what to make, say so and ask, rather than inventing a use for it.
+- Say what you used and what you ignored. A long document always has more in it than matters, and
+  they can't tell which parts you read unless you tell them.
+
 ## What the last build actually measured
 Sometimes you are given measurements below. They were taken off the mesh the renderer produced,
 not estimated, so they are true — and they describe THE LAST BUILD THAT RENDERED, which after a
@@ -424,25 +438,37 @@ Rules:
 - The note is for a beginner. Say what was wrong in shape terms, not compiler terms.`;
 
 /**
- * Hard ceiling on the base64 image payload.
+ * Hard ceiling on an attachment's payload.
  *
  * Vercel caps a function's whole request body at 4.5MB and rejects anything larger with a
  * 413 before this handler runs — so a limit sized to Anthropic's 5MB-per-image allowance
  * would be unreachable. 3MB here leaves ~1.3MB for the prompt, the current code and the
- * conversation history. The browser aims far below this; it's a backstop for direct callers.
+ * conversation history. The browser aims far below this for every kind of attachment; this
+ * is a backstop for direct callers.
  */
-const MAX_IMAGE_BASE64 = 3 * 1024 * 1024;
+const MAX_ATTACHMENT_BASE64 = 3 * 1024 * 1024;
 
 const RequestSchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
   currentCode: z.string().max(60000).optional(),
-  image: z
-    .object({
-      mediaType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
-      data: z.string().max(MAX_IMAGE_BASE64, "That picture is too large to send. Try a smaller one."),
-      /** A photo of what to make, or the current model with a part circled on it. */
-      kind: z.enum(["reference", "region"]).default("reference"),
-    })
+  attachment: z
+    .discriminatedUnion("form", [
+      z.object({
+        form: z.literal("image"),
+        mediaType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
+        data: z.string().max(MAX_ATTACHMENT_BASE64, "That picture is too large to send. Try a smaller one."),
+        /** A photo of what to make, or the current model with a part circled on it. */
+        kind: z.enum(["reference", "region"]).default("reference"),
+        name: z.string().max(200).optional(),
+      }),
+      z.object({
+        form: z.literal("document"),
+        /** Base64 for a PDF; the words themselves for anything written. */
+        mediaType: z.enum(["application/pdf", "text/plain"]),
+        data: z.string().max(MAX_ATTACHMENT_BASE64, "That file is too large to send. Try a smaller one."),
+        name: z.string().max(200).optional(),
+      }),
+    ])
     .optional(),
   history: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(6000) }))
@@ -710,7 +736,7 @@ async function runRepair(body: Body, send: Send, signal: AbortSignal) {
 
 /** The main path: design something, then check what came out. */
 async function runDesign(body: Body, send: Send, signal: AbortSignal) {
-  const { prompt, currentCode, history, image } = body;
+  const { prompt, currentCode, history, attachment } = body;
 
   let text = currentCode
     ? `Here is the code for what I have right now:\n\n${currentCode}\n\nPlease change it: ${prompt}`
@@ -736,7 +762,7 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
   // A circled screenshot and a reference photo are opposite instructions — one is the thing
   // to make, the other is the thing already made. Left unsaid, a region capture reads as
   // "build me this picture of a lamp with a pink ring on it".
-  if (image?.kind === "region") {
+  if (attachment?.form === "image" && attachment.kind === "region") {
     text +=
       "\n\nThe picture is the model as it looks right now, marked up in pink. Loops enclose a " +
       "part and arrows point at one. Those marks are what this message is about — the rest of " +
@@ -745,13 +771,27 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
       "took them to mean, so I can tell you if you picked the wrong ones.";
   }
 
-  // Images go before the text — Claude follows the instruction better in that order.
-  const content: Anthropic.ContentBlockParam[] = image
-    ? [
-        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
-        { type: "text", text },
-      ]
-    : [{ type: "text", text }];
+  // Whatever they attached goes before the text — Claude follows the instruction better in
+  // that order, and it reads the way a person would hand something over before explaining it.
+  const content: Anthropic.ContentBlockParam[] = [];
+  if (attachment?.form === "image") {
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: attachment.mediaType, data: attachment.data },
+    });
+  } else if (attachment?.form === "document") {
+    content.push({
+      type: "document",
+      // A PDF travels as bytes because taking it apart here would lose the drawings that
+      // are usually the reason for sending one. Anything written travels as itself.
+      source:
+        attachment.mediaType === "application/pdf"
+          ? { type: "base64", media_type: "application/pdf", data: attachment.data }
+          : { type: "text", media_type: "text/plain", data: attachment.data },
+      ...(attachment.name ? { title: attachment.name } : {}),
+    });
+  }
+  content.push({ type: "text", text });
 
   const messages: Anthropic.MessageParam[] = [
     ...(history ?? []).map((turn) => ({ role: turn.role, content: turn.content })),

@@ -1,4 +1,4 @@
-import type { PreparedImage } from "./imageAttachment";
+import type { PreparedImage } from "./attachment";
 
 /** A point on the viewer, in CSS pixels relative to it. */
 export interface MarkPoint {
@@ -79,6 +79,8 @@ export async function renderMarkup(
     data: encoded.slice(encoded.indexOf(",") + 1),
     mediaType: "image/jpeg",
     previewUrl: encoded,
+    form: "image",
+    name: "the model, marked up",
     kind: "region",
   };
 }

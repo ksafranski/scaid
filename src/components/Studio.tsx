@@ -11,8 +11,9 @@ import {
   Code,
   Eye,
   FloppyDisk,
-  ImageSquare,
+  FileText,
   Notebook,
+  Paperclip,
   Sliders,
   PencilSimple,
   Plus,
@@ -47,7 +48,11 @@ import { Dials } from "./Dials";
 import { parseParameters, setParameter } from "@/lib/scadParameters";
 import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
-import { prepareImage, ACCEPTED_IMAGE_TYPES, type PreparedImage } from "@/lib/imageAttachment";
+import {
+  prepareAttachment,
+  ACCEPTED_ATTACHMENTS,
+  type PreparedAttachment,
+} from "@/lib/attachment";
 import type { Markup } from "./ModelViewer";
 import { normalizeText } from "@/lib/emoji";
 import { describeCreation, isDraft, type BuildStep, type Creation } from "@/lib/types";
@@ -205,7 +210,7 @@ export function Studio({
   const [savedId, setSavedId] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [attachment, setAttachment] = useState<PreparedImage | null>(null);
+  const [attachment, setAttachment] = useState<PreparedAttachment | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [activity, setActivity] = useState<Activity>(IDLE_ACTIVITY);
@@ -478,21 +483,31 @@ export function Studio({
     return design;
   }
 
-  async function submitPrompt(text: string, image: PreparedImage | null = attachment) {
+  async function submitPrompt(text: string, file: PreparedAttachment | null = attachment) {
     if (working) return;
 
     // Marks live on the model rather than in the composer, so they're collected here, as the
     // message goes. They outrank a reference photo: one says "this part of what you built",
     // the other says "build me this", and only one picture travels with a message.
     const markup = await captureMarkupRef.current?.();
-    if (markup) image = markup.image;
+    if (markup) file = markup.image;
 
-    // A picture on its own is a complete request; fill in the words they didn't need to type.
+    // An attachment on its own is a complete request; fill in the words they didn't type.
     const trimmed =
-      text.trim() || (markup ? "Have a look at what I marked." : image ? "Build this from my picture." : "");
+      text.trim() ||
+      (markup
+        ? "Have a look at what I marked."
+        : file?.form === "image"
+          ? "Build this from my picture."
+          : file
+            ? `Have a look at ${file.name}.`
+            : "");
     if (!trimmed) return;
 
-    setMessages((prev) => [...prev, { kind: "you", text: trimmed, imageUrl: image?.previewUrl }]);
+    setMessages((prev) => [
+      ...prev,
+      { kind: "you", text: trimmed, imageUrl: file?.form === "image" ? file.previewUrl : undefined },
+    ]);
     setPrompt("");
     setAttachment(null);
     setAttachError(null);
@@ -516,8 +531,10 @@ export function Studio({
         measured: metrics ? (toMeasured(metrics) ?? undefined) : undefined,
         plateSizeMm,
         history,
-        image: image
-          ? { mediaType: image.mediaType, data: image.data, kind: image.kind }
+        attachment: file
+          ? file.form === "image"
+            ? { form: "image", mediaType: file.mediaType, data: file.data, kind: file.kind, name: file.name }
+            : { form: "document", mediaType: file.mediaType, data: file.data, name: file.name }
           : undefined,
       });
       if (!built) return;
@@ -852,8 +869,8 @@ export function Studio({
     if (!file) return;
     setAttachError(null);
 
-    const result = await prepareImage(file);
-    if (result.ok) setAttachment(result.image);
+    const result = await prepareAttachment(file);
+    if (result.ok) setAttachment(result.attachment);
     else setAttachError(result.error);
   }
 
@@ -1095,15 +1112,28 @@ export function Studio({
           >
             {attachment && (
               <div className="flex items-center gap-3 rounded-xl border border-ink-700 bg-ink-800 p-2 pr-3">
-                {/* eslint-disable-next-line @next/next/no-img-element -- a client-side data: URL */}
-                <img src={attachment.previewUrl} alt="Attached reference" className="h-11 w-11 rounded-lg object-cover" />
-                <span className="flex-1 text-sm font-medium text-mist-300">
-                  {attachment.kind === "region" ? "Region circled" : "Reference attached"}
+                {attachment.form === "image" ? (
+                  /* eslint-disable-next-line @next/next/no-img-element -- a client-side data: URL */
+                  <img
+                    src={attachment.previewUrl}
+                    alt="Attached reference"
+                    className="h-11 w-11 rounded-lg object-cover"
+                  />
+                ) : (
+                  <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-ink-700">
+                    <FileText size={20} weight="duotone" className="text-volt-400" />
+                  </span>
+                )}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-medium text-mist-300">
+                    {attachment.kind === "region" ? "Region circled" : attachment.name}
+                  </span>
+                  <span className="text-xs text-mist-500">{describeAttachment(attachment)}</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  aria-label="Remove attached picture"
+                  aria-label="Remove attachment"
                   className="rounded-lg p-1.5 text-mist-500 transition hover:bg-ink-700 hover:text-mist-100"
                 >
                   <X size={16} weight="bold" />
@@ -1138,32 +1168,35 @@ export function Studio({
               className="min-h-[3.25rem] w-full resize-none rounded-xl border border-ink-700 bg-ink-850 px-4 py-3 text-mist-100 transition placeholder:text-ink-500 focus:border-volt-500 focus:outline-none"
             />
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex gap-2">
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={ACCEPTED_IMAGE_TYPES.join(",")}
+                accept={ACCEPTED_ATTACHMENTS}
                 className="sr-only"
                 onChange={(event) => {
                   attachFile(event.target.files?.[0]);
                   event.target.value = ""; // let them re-pick the same file after removing it
                 }}
               />
-              <button
-                type="submit"
-                disabled={working || (!prompt.trim() && !attachment)}
-                className="rounded-xl bg-volt-500 px-4 py-3 font-semibold whitespace-nowrap text-white transition hover:bg-volt-600 disabled:opacity-40"
-              >
-                Build
-              </button>
-
+              {/* Attaching is the rarer move of the two, so it gives up its words and its
+                  width to the one that sends the message. */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center justify-center gap-2 rounded-xl border border-ink-700 px-4 py-3 font-semibold whitespace-nowrap text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100"
+                title="Attach a picture, a PDF or something written"
+                aria-label="Attach a picture, a PDF or something written"
+                className="flex shrink-0 items-center justify-center rounded-xl border border-ink-700 px-4 py-3 text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100"
               >
-                <ImageSquare size={18} weight="duotone" />
-                Add a picture
+                <Paperclip size={18} weight="bold" />
+              </button>
+
+              <button
+                type="submit"
+                disabled={working || (!prompt.trim() && !attachment)}
+                className="flex-1 rounded-xl bg-volt-500 px-4 py-3 font-semibold whitespace-nowrap text-white transition hover:bg-volt-600 disabled:opacity-40"
+              >
+                Build
               </button>
             </div>
           </form>
@@ -1304,6 +1337,14 @@ function Choices({
  * was missing. Emphasis runs the other way from a normal checklist — what's left is the
  * brighter text, because that's the part that still needs a decision.
  */
+/** What sort of thing is attached, in the words someone would use for it. */
+function describeAttachment(attachment: PreparedAttachment): string {
+  if (attachment.form === "image") {
+    return attachment.kind === "region" ? "Marked up on the model" : "Picture";
+  }
+  return attachment.mediaType === "application/pdf" ? "PDF" : "Written notes";
+}
+
 function Requirements({ requirements }: { requirements: AgentRequirement[] }) {
   const done = requirements.filter((requirement) => requirement.done).length;
 

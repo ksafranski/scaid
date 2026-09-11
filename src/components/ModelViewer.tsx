@@ -27,7 +27,7 @@ import {
   type PlatePoint,
   type Spot,
 } from "@/lib/measure";
-import type { PreparedImage } from "@/lib/imageAttachment";
+import type { PreparedImage } from "@/lib/attachment";
 import {
   defaultPosition,
   sectionRange,

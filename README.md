@@ -4,7 +4,9 @@ Describe what you want to build, and Scaid designs it in 3D — then explains, i
 what it made and *why* it made those calls. Aimed at makers from about middle school up.
 
 - **Ask for anything** — "a phone stand angled for video", "a hex keychain with a hole for a ring".
-- **Or show it a picture** — attach a drawing or photo and Scaid builds a simplified 3D version.
+- **Or hand it something** — attach a drawing or photo and Scaid builds a simplified 3D version;
+  attach a datasheet or your own notes and it builds to the sizes they give. Pictures, PDFs,
+  Markdown and plain text.
 - **Spin it around** — the model renders in the browser; drag to spin, scroll to zoom.
 - **Measure it** — the ruler in the viewer reads off the build plate: click a spot for its
   position, or drag between two for the distance, the gap on each axis and the angle off the
