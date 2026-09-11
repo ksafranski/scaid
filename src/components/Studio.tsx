@@ -215,6 +215,7 @@ export function Studio({
     measuredCode,
     section,
     advice,
+    snapTargets,
     render,
     reset,
     setSection,
@@ -1316,6 +1317,7 @@ export function Studio({
             section={section}
             modelBounds={metrics && !metrics.empty ? metrics.bounds : null}
             modelRadiusMm={metrics?.boundingRadius}
+            snapTargets={snapTargets}
             onSection={setSection}
           />
 

@@ -24,6 +24,12 @@ export interface Spot {
   at: PlatePoint;
   /** A direction, not a length: the surface normal on the same axes as the plate. */
   facing: PlatePoint;
+  /**
+   * Set when this landed on a corner of the model rather than wherever the ray happened
+   * to hit. Worth recording: a reading taken between two corners is a measurement of the
+   * object, and one taken between two points near them is a measurement of the click.
+   */
+  snapped?: boolean;
 }
 
 /**
@@ -64,6 +70,57 @@ export function toSpot(hit: {
     // Already a unit direction, and scaling a direction by the units would say nothing.
     facing: { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z },
   };
+}
+
+/**
+ * How near a click has to land before it counts as meaning a corner.
+ *
+ * In pixels, converted to millimeters against the current zoom by the viewer, so it stays
+ * the same distance under the finger whether the model fills the screen or sits in the
+ * middle of it.
+ */
+export const SNAP_PIXELS = 14;
+
+/**
+ * The corner a reading meant, if it meant one.
+ *
+ * A measurement is only worth taking if it lands where you intended, and a ray hits
+ * wherever it hits — a couple of pixels off a corner is a couple of millimeters off the
+ * answer, with nothing on screen to say so. Corners are the points a caliper would find,
+ * and they are the ones the mesh actually knows: every other feature a person would want
+ * to measure from, an edge or the middle of a hole, has to be inferred from triangles that
+ * were never told they formed one. Those are a separate problem, not a larger version of
+ * this one.
+ *
+ * Vertices arrive as the renderer produced them, where the model has not yet been dropped
+ * onto the plate — the same shift `exportGlb` applies, undone here so both sides are
+ * talking about the same point.
+ */
+export function snapTo(
+  point: PlatePoint,
+  vertices: ReadonlyArray<{ x: number; y: number; z: number }>,
+  lowestZ: number,
+  toleranceMm: number,
+): PlatePoint | null {
+  if (!vertices.length || !(toleranceMm > 0)) return null;
+
+  let nearest: PlatePoint | null = null;
+  let nearestDistance = toleranceMm;
+
+  for (const v of vertices) {
+    const dx = v.x - point.x;
+    const dy = v.y - point.y;
+    const dz = v.z - lowestZ - point.z;
+    // Compared squared against squared: a square root per vertex, over a mesh this size,
+    // to find a minimum that squaring preserves.
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = { x: v.x, y: v.y, z: v.z - lowestZ };
+    }
+  }
+
+  return nearest;
 }
 
 /** What a two-point measurement works out to. */

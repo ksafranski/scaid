@@ -17,11 +17,13 @@ import { WorkingLine, WorkingOverlay } from "./Working";
 import { MARKUP_COLOR, REGION_FILL, renderMarkup, type Mark, type MarkPoint } from "@/lib/markup";
 import {
   MEASURE_COLOR,
+  SNAP_PIXELS,
   coords,
   deg,
   mm,
   place,
   span,
+  snapTo,
   toSpot,
   type Measurement,
   type PlatePoint,
@@ -223,6 +225,21 @@ function aroundTheMiddle(
 }
 
 /**
+ * How many millimeters a pixel covers, at the depth the model is being looked at.
+ *
+ * So a tolerance in pixels stays the same distance under the finger whether the model fills
+ * the screen or sits small in the middle of it. Measured across the height, which is the
+ * dimension the field of view is quoted in.
+ */
+function millimetersPerPixel(viewer: ModelViewerElement): number {
+  const height = viewer.getBoundingClientRect().height;
+  if (!height) return 0;
+  const halfVertical = ((viewer.getFieldOfView() * Math.PI) / 180) / 2;
+  const visibleMm = 2 * viewer.getCameraOrbit().radius * Math.tan(halfVertical) * MM_PER_METER;
+  return visibleMm / height;
+}
+
+/**
  * Points the camera at the object, and hands back the undo.
  *
  * Keeps the angle and moves only the distance and what's being looked at, so the picture
@@ -324,6 +341,7 @@ export function ModelViewer({
   section,
   modelBounds,
   modelRadiusMm,
+  snapTargets,
   onSection,
 }: {
   src: string | null;
@@ -338,6 +356,8 @@ export function ModelViewer({
   modelBounds?: Bounds | null;
   /** How far the object reaches from the middle of that box, in millimeters. */
   modelRadiusMm?: number;
+  /** The model's corners, so a reading can land on one instead of near it. */
+  snapTargets?: { vertices: Array<{ x: number; y: number; z: number }>; lowestZ: number } | null;
   onSection?: (section: Section | null) => void;
   /**
    * Filled in with a function the composer calls as it sends.
@@ -571,8 +591,23 @@ export function ModelViewer({
    * box itself, whatever its documentation says about the arguments.
    */
   function plateAt(event: React.PointerEvent<HTMLDivElement>): Spot | null {
-    const hit = viewerRef.current?.positionAndNormalFromPoint(event.clientX, event.clientY);
-    return hit ? toSpot(hit) : null;
+    const viewer = viewerRef.current;
+    const hit = viewer?.positionAndNormalFromPoint(event.clientX, event.clientY);
+    if (!viewer || !hit) return null;
+
+    const spot = toSpot(hit);
+    if (!snapTargets) return spot;
+
+    // A corner within a few pixels of the click is almost certainly what was meant, and the
+    // difference between "almost on the corner" and "on it" is the difference between
+    // measuring the object and measuring the click.
+    const corner = snapTo(
+      spot.at,
+      snapTargets.vertices,
+      snapTargets.lowestZ,
+      millimetersPerPixel(viewer) * SNAP_PIXELS,
+    );
+    return corner ? { ...spot, at: corner, snapped: true } : spot;
   }
 
   /** Keeps the overlay's size to hand, so a popup near an edge can be nudged back inside. */
@@ -1391,10 +1426,25 @@ function Readout({
       </dl>
 
       <p className="mt-2.5 border-t border-ink-700 pt-2 text-[10px] leading-snug text-mist-500">
+        {snappedEnds(measurement)}
         Millimeters. x and y from the middle of the plate, z up from its surface.
       </p>
     </div>
   );
+}
+
+/**
+ * Says when a reading was moved onto a corner.
+ *
+ * A point that lands somewhere other than where it was clicked has to account for itself,
+ * or it reads as the ruler being imprecise when it is being the opposite.
+ */
+function snappedEnds(measurement: Measurement): string {
+  const ends = [measurement.from, measurement.to].filter(Boolean);
+  const snapped = ends.filter((end) => end?.snapped).length;
+  if (!snapped) return "";
+  if (ends.length === 2 && snapped === 2) return "Both ends sit on a corner. ";
+  return snapped === ends.length ? "On a corner. " : "One end sits on a corner. ";
 }
 
 /** Where a single spot sits, said three ways, because different jobs want different ones. */

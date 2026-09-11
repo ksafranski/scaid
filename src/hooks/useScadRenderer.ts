@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseOff } from "@/io/import_off";
-import type { IndexedPolyhedron } from "@/io/common";
+import type { IndexedPolyhedron, Vertex } from "@/io/common";
 import { exportGlb } from "@/io/export_glb";
 import { friendlyError } from "@/lib/friendlyErrors";
 import { extractRequestedColors } from "@/lib/scadColors";
@@ -72,6 +72,15 @@ export interface RenderState {
   section: Section | null;
   /** A better way up, when there is one worth the interruption. */
   advice: OrientationAdvice | null;
+  /**
+   * The model's own corners, for a measurement to land on.
+   *
+   * The whole mesh rather than a copy shifted onto the plate: it is the same array the
+   * renderer already holds, and the shift is one subtraction per candidate at the moment
+   * of a click. Copying a few hundred thousand vertices to save that would be the wrong
+   * way round.
+   */
+  snapTargets: { vertices: Vertex[]; lowestZ: number } | null;
 }
 
 /**
@@ -99,6 +108,7 @@ export function useScadRenderer(plateSizeMm: number) {
     measuredCode: null,
     section: null,
     advice: null,
+    snapTargets: null,
   });
 
   /**
@@ -195,6 +205,9 @@ export function useScadRenderer(plateSizeMm: number) {
             measuredCode: request?.code ?? null,
             size: metrics.empty ? null : metrics.size,
             advice: null, // whatever was advised was about the model before this one
+            snapTargets: metrics.empty
+              ? null
+              : { vertices: polyhedron.vertices, lowestZ: metrics.lowestZ },
           }));
 
           // Looking for a better way up is a handful of passes over a mesh already in
@@ -287,6 +300,7 @@ export function useScadRenderer(plateSizeMm: number) {
       measuredCode: null,
       section: null,
       advice: null,
+      snapTargets: null,
     });
   }, []);
 

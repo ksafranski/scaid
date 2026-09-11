@@ -10,7 +10,8 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
 - **Spin it around** — the model renders in the browser; drag to spin, scroll to zoom.
 - **Measure it** — the ruler in the viewer reads off the build plate: click a spot for its
   position, or drag between two for the distance, the gap on each axis and the angle off the
-  plate. Readings stay on the model while you turn it.
+  plate. Readings stay on the model while you turn it, and land on a corner when you click near
+  one, so corner to corner across a 15mm edge reads 15.00 and not 14.8.
 - **Cut it open** — slice the model across X, Y or Z and slide the cut through it. The ruler
   still works on the exposed face, so measuring a wall's thickness is one drag.
 - **Print it the right way up** — when turning it over would save support, the studio says so
@@ -167,6 +168,23 @@ Only a number, `true`/`false`, or one of a listed set of strings is ever written
 these as expressions, so a value carrying a semicolon would be a second statement, and a value that
 isn't a number at all becomes `undef` and renders a silently wrong shape rather than an error.
 Both are refused before they reach the program.
+
+### The ruler landing where you meant
+
+A ray hits wherever it hits, so a click a couple of pixels off a corner is a couple of
+millimeters off the answer with nothing on screen to say so. A reading now moves onto the nearest
+corner of the model when there is one within fourteen pixels of the click — pixels, converted
+against the current zoom, so the reach stays the same under your finger whether the model fills
+the screen or sits small in the middle of it. It is 0.5mm zoomed in and 9mm zoomed right out, and
+both are the same fourteen pixels.
+
+Corners only, and deliberately. They are the points a caliper would find and the ones the mesh
+actually knows. Every other feature worth measuring from — an edge, the middle of a hole — has to
+be inferred from triangles that were never told they formed one, which is a different problem
+rather than a larger version of this one.
+
+The readout says when a reading was moved, because a point that lands somewhere other than where
+it was clicked has to account for itself.
 
 ### Held to what it said
 

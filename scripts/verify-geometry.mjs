@@ -27,6 +27,7 @@ const { stances, betterStance, turnSource, STANCES } = await import("../src/lib/
 const { checkExpectations, misses, describeMisses, MEASURABLES } = await import(
   "../src/lib/geometry/expectations.ts"
 );
+const { snapTo } = await import("../src/lib/measure.ts");
 
 const filter = process.argv[2];
 
@@ -662,6 +663,74 @@ const EXPECTATIONS = [
   }),
 ];
 
+/**
+ * The ruler landing where it was meant to.
+ *
+ * These run against a real mesh rather than made-up points, because the thing that makes
+ * snapping wrong in practice isn't the arithmetic — it's the model sitting somewhere other
+ * than where the measurement thinks it is. A cube built from z=0 to z=20 and one built from
+ * z=-10 to z=10 have to snap to the same readings.
+ */
+const SNAPPING = [
+  check("snap › a near miss lands on the corner, a far one lands nowhere", async () => {
+    const { off } = await render("cube(20);", { includeOff: true });
+    const mesh = parseOff(off);
+    const report = inspectMesh(mesh);
+
+    // The corner at (20, 20, 20) in plate terms, clicked a fraction off.
+    const near1 = snapTo({ x: 19.6, y: 20.3, z: 19.8 }, mesh.vertices, report.lowestZ, 2);
+    if (!near1) throw new Error("a click a fraction off a corner found nothing");
+    near(near1.x, 20, 1e-6, "snapped x");
+    near(near1.y, 20, 1e-6, "snapped y");
+    near(near1.z, 20, 1e-6, "snapped z");
+
+    // The middle of a face is nowhere near a corner and must stay where it was put.
+    is(snapTo({ x: 10, y: 10, z: 20 }, mesh.vertices, report.lowestZ, 2), null, "middle of a face");
+  }),
+
+  check("snap › the model being modelled below the plate changes nothing", async () => {
+    // exportGlb drops the model so its underside sits at z=0, and a reading is taken in
+    // those terms while the mesh is still in its own. Get that wrong and every snap on a
+    // model built around the origin is off by half its height.
+    const { off } = await render("cube(20, center = true);", { includeOff: true });
+    const mesh = parseOff(off);
+    const report = inspectMesh(mesh);
+    near(report.lowestZ, -10, 1e-6, "this one really is below the plate");
+
+    // Its top corner reads as z = 20 on the plate, not z = 10 as the mesh has it.
+    const snapped = snapTo({ x: 9.7, y: 10.2, z: 19.6 }, mesh.vertices, report.lowestZ, 2);
+    if (!snapped) throw new Error("nothing found at the top corner");
+    near(snapped.z, 20, 1e-6, "snapped to the plate reading, not the mesh one");
+    near(snapped.x, 10, 1e-6, "snapped x");
+  }),
+
+  check("snap › it takes the nearest corner, not the first one it passes", async () => {
+    const { off } = await render("cube(20);", { includeOff: true });
+    const mesh = parseOff(off);
+    const report = inspectMesh(mesh);
+    // Nearer to (20,0,0) than to (0,0,0), with both inside a generous tolerance.
+    const snapped = snapTo({ x: 13, y: 0.4, z: 0.4 }, mesh.vertices, report.lowestZ, 40);
+    near(snapped.x, 20, 1e-6, "the nearer corner");
+  }),
+
+  check("snap › a measurement between two snapped corners is the real size", async () => {
+    // The point of all of it: corner to corner across a 20mm cube is 20mm, not 19.7.
+    const { off } = await render("cube([20, 35, 12]);", { includeOff: true });
+    const mesh = parseOff(off);
+    const report = inspectMesh(mesh);
+    const a = snapTo({ x: 0.3, y: 0.2, z: 0.4 }, mesh.vertices, report.lowestZ, 2);
+    const b = snapTo({ x: 19.8, y: 0.3, z: 0.2 }, mesh.vertices, report.lowestZ, 2);
+    near(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z), 20, 1e-6, "corner to corner");
+  }),
+
+  check("snap › nothing to snap to, or no tolerance, snaps nothing", async () => {
+    const { off } = await render("cube(20);", { includeOff: true });
+    const mesh = parseOff(off);
+    is(snapTo({ x: 0, y: 0, z: 0 }, [], 0, 5), null, "no vertices");
+    is(snapTo({ x: 0, y: 0, z: 0 }, mesh.vertices, 0, 0), null, "no tolerance");
+  }),
+];
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -707,7 +776,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING]) {
   if (!item) continue;
   const started = Date.now();
   try {
