@@ -123,7 +123,6 @@ export function ModelFacts({
 
   const overhangs = size.x > plateSizeMm || size.y > plateSizeMm;
   const rows = metrics ? factRows(metrics) : [];
-  const problem = rows.some((row) => row.warn);
   const round = (value: number) => (value < 10 ? value.toFixed(1) : Math.round(value));
 
   useEffect(() => {
@@ -153,8 +152,10 @@ export function ModelFacts({
     </>
   );
 
-  const tone = problem || overhangs ? "text-amber-400" : "text-mist-500";
-  const Glyph = problem || overhangs ? Warning : Ruler;
+  // Only the plate warns, and only because it's the one reading that means the thing in
+  // front of you cannot be made at all. Everything else in here is a measurement.
+  const tone = overhangs ? "text-amber-400" : "text-mist-500";
+  const Glyph = overhangs ? Warning : Ruler;
 
   // Until the measurements land — one frame after the model appears — there is nothing
   // behind the click, so it stays the plain readout it has always been.
@@ -207,7 +208,7 @@ export function ModelFacts({
             {rows.map((row) => (
               <div key={row.label} className="flex items-baseline gap-3 px-3 py-2">
                 <dt className="w-20 shrink-0 text-xs font-semibold text-mist-500">{row.label}</dt>
-                <dd className={`min-w-0 text-xs ${row.warn ? "text-amber-400" : "text-mist-200"}`}>
+                <dd className="min-w-0 text-xs text-mist-200">
                   {row.value}
                 </dd>
               </div>

@@ -50,12 +50,17 @@ export function toMeasured(report: GeometryReport): Measured | null {
 const round = (value: number) => (value < 10 ? value.toFixed(1) : String(Math.round(value)));
 const whole = (value: number) => Math.round(value).toLocaleString("en-US");
 
-/** One measured fact, in the shape the spec document already renders. */
+/**
+ * One measured fact, in the shape the spec document already renders.
+ *
+ * Deliberately without a flag for "this one is bad". A model on the way to being finished
+ * is allowed not to balance, and a reading dressed as a warning every time it's looked at
+ * stops being read. These are what the object measures; what to do about any of them is
+ * the maker's call.
+ */
 export interface FactRow {
   label: string;
   value: string;
-  /** Set when the number is a problem rather than just a fact. */
-  warn?: boolean;
 }
 
 /**
@@ -81,17 +86,14 @@ export function factRows(report: GeometryReport): FactRow[] {
 
   rows.push({ label: "Surface", value: `${whole(report.area)} mm²` });
 
-  rows.push(
-    closed
-      ? { label: "Solid", value: "Closed all the way round" }
-      : {
-          label: "Solid",
-          value: report.watertight.skipped
-            ? "Too big to check"
-            : describeDefect(report),
-          warn: !report.watertight.skipped,
-        },
-  );
+  rows.push({
+    label: "Solid",
+    value: closed
+      ? "Closed all the way round"
+      : report.watertight.skipped
+        ? "Too big to check"
+        : describeDefect(report),
+  });
 
   rows.push({
     label: "Overhangs",
@@ -104,7 +106,7 @@ export function factRows(report: GeometryReport): FactRow[] {
   rows.push({ label: "Sits on", value: `${whole(report.bed.contactArea)} mm² of plate` });
 
   if (report.bed.balancesOnAPoint) {
-    rows.push({ label: "Balance", value: "Touches the plate on a single line — it won't stand", warn: true });
+    rows.push({ label: "Balance", value: "Touches the plate on a single line" });
   } else if (report.bed.tipMargin !== null) {
     rows.push(
       report.bed.tipMargin > 0
@@ -114,7 +116,7 @@ export function factRows(report: GeometryReport): FactRow[] {
               report.bed.tipAngleDeg !== null ? ` — tips at ${Math.round(report.bed.tipAngleDeg)}°` : ""
             }`,
           }
-        : { label: "Balance", value: "Outside its footprint — it falls over", warn: true },
+        : { label: "Balance", value: "Outside its footprint" },
     );
   }
 
