@@ -1234,6 +1234,7 @@ export function Studio({
             snapshotRef={snapshotRef}
             section={section}
             modelBounds={metrics && !metrics.empty ? metrics.bounds : null}
+            modelRadiusMm={metrics?.boundingRadius}
             onSection={setSection}
           />
 

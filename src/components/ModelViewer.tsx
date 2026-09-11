@@ -191,6 +191,38 @@ function contentBounds(
 }
 
 /**
+ * Widens a trim until it sits squarely around the middle of the frame.
+ *
+ * The camera has already put the object in the centre, so the centre is where it has to
+ * stay. Trimming straight to what was drawn doesn't keep it there: the empty sky above the
+ * plate gets cut and the plate below doesn't, and the object rides up into the top of the
+ * picture by exactly the difference — which is what "it isn't centred" looked like.
+ *
+ * So a side is only trimmed as far as the opposite side can be trimmed with it. Emptiness
+ * on both sides goes, emptiness on one stays, and the subject never moves.
+ */
+function aroundTheMiddle(
+  trim: { x: number; y: number; width: number; height: number } | null,
+  whole: { x: number; y: number; width: number; height: number },
+): { x: number; y: number; width: number; height: number } {
+  if (!trim) return whole;
+
+  const middleX = whole.width / 2;
+  const middleY = whole.height / 2;
+  const reachX = Math.max(middleX - trim.x, trim.x + trim.width - middleX);
+  const reachY = Math.max(middleY - trim.y, trim.y + trim.height - middleY);
+
+  const x = Math.max(0, Math.round(middleX - reachX));
+  const y = Math.max(0, Math.round(middleY - reachY));
+  return {
+    x,
+    y,
+    width: Math.min(whole.width - x, Math.round(reachX * 2)),
+    height: Math.min(whole.height - y, Math.round(reachY * 2)),
+  };
+}
+
+/**
  * Points the camera at the object, and hands back the undo.
  *
  * Keeps the angle and moves only the distance and what's being looked at, so the picture
@@ -202,25 +234,27 @@ function contentBounds(
  * Returns a no-op when there's nothing measured to frame against, which leaves the view
  * exactly as it is: a picture framed by hand beats one framed by a guess.
  */
-function frameOnModel(viewer: ModelViewerElement, bounds: Bounds | null): () => void {
-  if (!bounds) return () => {};
-
-  const size = {
-    x: bounds.max.x - bounds.min.x,
-    y: bounds.max.y - bounds.min.y,
-    z: bounds.max.z - bounds.min.z,
-  };
-  const radius = Math.hypot(size.x, size.y, size.z) / 2 / MM_PER_METER;
-  if (!(radius > 0)) return () => {};
+function frameOnModel(
+  viewer: ModelViewerElement,
+  bounds: Bounds | null,
+  radiusMm: number,
+): () => void {
+  if (!bounds || !(radiusMm > 0)) return () => {};
 
   const orbit = viewer.getCameraOrbit();
   const target = viewer.getCameraTarget();
   const view = viewer.getBoundingClientRect();
   if (!view.width || !view.height) return () => {};
 
+  // Far enough back that a ball of this reach, centred on the object, sits inside the
+  // frame — measured against the narrower of the viewport's two half-angles, which is the
+  // vertical one on a wide panel and the horizontal one on a tall one. Framing to the wider
+  // one would clip the picture along the other.
   const halfVertical = ((viewer.getFieldOfView() * Math.PI) / 180) / 2;
   const halfHorizontal = Math.atan(Math.tan(halfVertical) * (view.width / view.height));
-  const distance = (radius / Math.sin(Math.min(halfVertical, halfHorizontal))) * SNAPSHOT_MARGIN;
+  const distance =
+    (radiusMm / MM_PER_METER / Math.sin(Math.min(halfVertical, halfHorizontal))) * SNAPSHOT_MARGIN;
+  if (!Number.isFinite(distance) || distance <= 0) return () => {};
 
   // The middle of the object, on the axes model-viewer hangs things from — the same turn
   // the hotspots undo, for the same reason.
@@ -251,9 +285,8 @@ async function flatten(snapshot: string): Promise<string | null> {
   });
   if (!source?.naturalWidth) return null;
 
-  const crop =
-    contentBounds(source) ??
-    { x: 0, y: 0, width: source.naturalWidth, height: source.naturalHeight };
+  const whole = { x: 0, y: 0, width: source.naturalWidth, height: source.naturalHeight };
+  const crop = aroundTheMiddle(contentBounds(source), whole);
 
   const fit = Math.min(1, SNAPSHOT_MAX_EDGE / Math.max(crop.width, crop.height));
   const canvas = document.createElement("canvas");
@@ -290,6 +323,7 @@ export function ModelViewer({
   snapshotRef,
   section,
   modelBounds,
+  modelRadiusMm,
   onSection,
 }: {
   src: string | null;
@@ -302,6 +336,8 @@ export function ModelViewer({
    * Bounds where a cut can be placed, and frames the picture the write-up takes.
    */
   modelBounds?: Bounds | null;
+  /** How far the object reaches from the middle of that box, in millimeters. */
+  modelRadiusMm?: number;
   onSection?: (section: Section | null) => void;
   /**
    * Filled in with a function the composer calls as it sends.
@@ -655,7 +691,7 @@ export function ModelViewer({
       //
       // Only the distance and the centre move. The angle is left exactly as they turned
       // it, because which way the thing is facing is the part they chose.
-      const restore = frameOnModel(viewer, modelBounds ?? null);
+      const restore = frameOnModel(viewer, modelBounds ?? null, modelRadiusMm ?? 0);
       try {
         // Two frames: one for the camera to take the new goal, one to draw at it.
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -668,7 +704,7 @@ export function ModelViewer({
     return () => {
       snapshotRef.current = null;
     };
-  }, [snapshotRef, modelShown, modelBounds]);
+  }, [snapshotRef, modelShown, modelBounds, modelRadiusMm]);
 
   const resetView = useCallback(() => {
     const viewer = viewerRef.current;

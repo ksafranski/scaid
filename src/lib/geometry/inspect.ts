@@ -92,6 +92,16 @@ export interface GeometryReport {
   size: { x: number; y: number; z: number };
   /** The corners of the box the model sits in, which is what a cut plane is bounded by. */
   bounds: Bounds;
+  /**
+   * From the middle of that box to the furthest point on the surface, in millimeters.
+   *
+   * What a picture of the object has to be framed to hold. The box's own diagonal would
+   * do it too, and far too generously: for a ball it is half again longer than the ball's
+   * radius, and a camera pulled back to clear it leaves the ball filling half the frame it
+   * was given. This is the real reach, whatever shape produced it, and it doesn't change
+   * when the thing is turned around.
+   */
+  boundingRadius: number;
   /** The lowest point, so callers can talk about heights the same way the plate does. */
   lowestZ: number;
   /**
@@ -117,6 +127,7 @@ const EMPTY_REPORT: GeometryReport = {
   triangles: 0,
   size: { x: 0, y: 0, z: 0 },
   bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+  boundingRadius: 0,
   lowestZ: 0,
   volume: 0,
   area: 0,
@@ -164,6 +175,14 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
   const oz = (minZ + maxZ) / 2;
 
   const contactCeiling = minZ + CONTACT_EPS_MM;
+
+  // Measured from the middle of the box rather than from the centre of mass, so it stays
+  // the same when the inside of the model changes and the outside doesn't.
+  let boundingRadius = 0;
+  for (const v of vertices) {
+    const reach = Math.hypot(v.x - ox, v.y - oy, v.z - oz);
+    if (reach > boundingRadius) boundingRadius = reach;
+  }
 
   let area = 0;
   let sixVolume = 0;
@@ -257,6 +276,7 @@ export function inspectMesh(mesh: IndexedPolyhedron): GeometryReport {
     triangles: faces.length,
     size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
     bounds: { min: { x: minX, y: minY, z: minZ }, max: { x: maxX, y: maxY, z: maxZ } },
+    boundingRadius,
     lowestZ: minZ,
     volume,
     area,

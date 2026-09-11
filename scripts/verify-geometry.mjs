@@ -84,6 +84,26 @@ const CHECKS = [
     is(r.empty, false, "empty");
   }),
 
+  check("reach › the radius is the real one, not the box's corner", async () => {
+    // A cube's furthest point IS its corner, so the two agree and this pins the maths.
+    const cube = await inspect("cube(20);");
+    near(cube.boundingRadius, Math.hypot(10, 10, 10), 1e-6, "a cube reaches its corner");
+
+    // A ball's doesn't. Half the box diagonal here is 17.3mm against a real reach of 10 —
+    // and a picture framed to the larger number leaves the ball at half the size it should
+    // be, which is exactly the bug this measurement exists to stop.
+    const ball = await inspect("sphere(r = 10, $fn = 128);");
+    near(ball.boundingRadius, 10, 10 * 0.01, "a ball reaches its own radius");
+    if (!(ball.boundingRadius < Math.hypot(10, 10, 10) * 0.7)) {
+      throw new Error("a ball is being measured as though it were a cube");
+    }
+
+    // Turning something must not change how big it is.
+    const flat = await inspect("cube([40, 10, 10], center = true);");
+    const turned = await inspect("rotate([0, 0, 37]) cube([40, 10, 10], center = true);");
+    near(turned.boundingRadius, flat.boundingRadius, 0.01, "reach survives a rotation");
+  }),
+
   check("cube › centered, to pin the centering of the sums", async () => {
     const r = await inspect("cube([20,20,20], center=true);");
     near(r.volume, 8000, 1e-6, "volume");
