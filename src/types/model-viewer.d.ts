@@ -15,6 +15,26 @@ export interface ModelViewerElement extends HTMLElement {
   jumpCameraToGoal(): void;
   /** Snapshot of the rendered canvas — how a circled region gets its picture. */
   toDataURL(type?: string, encoderOptions?: number): string;
+  /**
+   * Where a pixel lands on the model, in the model's own coordinates — millimeters scaled
+   * by 0.001, Z up, as the GLB was written. Null when the ray misses everything.
+   */
+  positionAndNormalFromPoint(
+    pixelX: number,
+    pixelY: number,
+  ): { position: Vector3D; normal: Vector3D } | null;
+  /**
+   * Where a slotted hotspot currently sits on screen, in CSS pixels from the element's
+   * top-left. This is the only way back from model coordinates to the overlay, so it is
+   * what lets a measurement stay on its spot while the model turns.
+   */
+  queryHotspot(name: string): { canvasPosition: Vector3D; facingCamera: boolean } | null;
+}
+
+export interface Vector3D {
+  x: number;
+  y: number;
+  z: number;
 }
 
 export interface ModelViewerProps extends React.HTMLAttributes<HTMLElement> {

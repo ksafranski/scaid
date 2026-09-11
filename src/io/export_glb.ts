@@ -196,7 +196,11 @@ export async function exportGlb(data: IndexedPolyhedron, buildPlateSizeMm: numbe
         .setType(Accessor.Type.VEC3)
         .setArray(new Float32Array(pos)));
     mesh.addPrimitive(prim);
-    scene.addChild(doc.createNode().setName(name).setMesh(mesh));
+    // `noHit` keeps the ruler off the grid. model-viewer raycasts the whole scene, and
+    // three treats a line as hit whenever the ray passes within a threshold of it — a
+    // threshold measured in scene units, where this entire plate is a quarter of one. Every
+    // pick would land on a grid line instead of the model without this.
+    scene.addChild(doc.createNode().setName(name).setMesh(mesh).setExtras({ noHit: true }));
   };
 
   // Tuned for the dark studio background: dark-on-dark would be invisible. Kept dim enough

@@ -6,6 +6,9 @@ what it made and *why* it made those calls. Aimed at makers from about middle sc
 - **Ask for anything** — "a phone stand angled for video", "a hex keychain with a hole for a ring".
 - **Or show it a picture** — attach a drawing or photo and Scaid builds a simplified 3D version.
 - **Spin it around** — the model renders in the browser; drag to spin, scroll to zoom.
+- **Measure it** — the ruler in the viewer reads off the build plate: click a spot for its
+  position, or drag between two for the distance, the gap on each axis and the angle off the
+  plate. Readings stay on the model while you turn it.
 - **Understand it** — every build comes with a step-by-step breakdown and the reasoning behind each
   choice.
 - **Then change it yourself** — switch the left panel to Code and edit directly. The model
