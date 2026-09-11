@@ -323,12 +323,12 @@ export function DownloadMenu({
           role="menu"
           className="absolute right-0 z-30 mt-1.5 w-64 overflow-hidden rounded-xl border border-ink-700 bg-ink-850 shadow-2xl"
         >
-          {/* First, because it's the better file: STL has no units and no colour, and
-              stays above it only because plenty of workflows still expect one. */}
+          {/* 3MF first: it records units and colour, which STL has no way to carry. STL
+              stays because plenty of workflows still expect one. */}
           <MenuItem
             Glyph={Cube}
             title="3MF"
-            detail="For your slicer — keeps the colours and the millimeters"
+            detail="A printing format that records the model in millimeters, with its colours."
             onClick={() => {
               setOpen(false);
               onDownload3mf();
@@ -337,7 +337,7 @@ export function DownloadMenu({
           <MenuItem
             Glyph={Blueprint}
             title="STL"
-            detail="The older format, if something you use wants one"
+            detail="A mesh of plain triangles, without units or colours. Read by every tool."
             onClick={() => {
               setOpen(false);
               onDownloadStl();
@@ -346,7 +346,7 @@ export function DownloadMenu({
           <MenuItem
             Glyph={CodeBlock}
             title="SCAD"
-            detail="The source, to open in OpenSCAD"
+            detail="The OpenSCAD program the model was built from."
             onClick={() => {
               setOpen(false);
               onDownloadScad();
@@ -359,8 +359,8 @@ export function DownloadMenu({
             title="Spec document"
             detail={
               sectioned
-                ? "Close the cut first — the write-up takes a picture of the model"
-                : "The picture, the measurements and the code, written up"
+                ? "Close the cut first — the write-up takes a picture of the model."
+                : "The picture, the measurements, the reasoning and the code, on one page."
             }
             disabled={sectioned}
             onClick={() => {
