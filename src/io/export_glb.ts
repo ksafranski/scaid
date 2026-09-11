@@ -32,7 +32,11 @@ function createPrimitive(doc: Document, baseColorFactor: Color, {positions, indi
         .setDoubleSided(true)
         .setAlphaMode(baseColorFactor[3] < 1 ? 'BLEND' : 'OPAQUE')
         .setMetallicFactor(0.0)
-        .setRoughnessFactor(0.6)
+        // Matte enough to read as printed plastic, glossy enough that the environment
+        // slides across a curve instead of sitting on it as one flat tone. At 0.6 a white
+        // sphere came out as a flat white disc; much below 0.5 and a dark one turns into a
+        // mirror showing the room it isn't in.
+        .setRoughnessFactor(0.5)
         .setBaseColorFactor(convertColor(baseColorFactor)))
     .setAttribute('POSITION',
       doc.createAccessor()
@@ -87,20 +91,34 @@ export async function exportGlb(data: IndexedPolyhedron, buildPlateSizeMm: numbe
   const lightExt = doc.createExtension(KHRLightsPunctual);
   doc.createBuffer();
 
+  /**
+   * A key and a fill, far apart in strength.
+   *
+   * What makes a shape readable is the difference between its faces, not how much light
+   * there is — and a pale object lit evenly from two sides has no differences left. The
+   * old pair were close enough in strength (1.5 and 0.5) that a light grey tray came out
+   * as one flat silhouette: top, wall and floor all the same value.
+   *
+   * So the key does most of the work and the fill only keeps the shadowed faces from
+   * going to black. The environment supplies the rest of the ambient.
+   */
   const scene = doc.createScene()
     .addChild(doc.createNode()
       .setExtension('KHR_lights_punctual', lightExt
         .createLight()
         .setType(LightDef.Type.DIRECTIONAL)
-        .setIntensity(1.5)
-        .setColor([1.0, 1.0, 1.0]))
+        .setIntensity(2.6)
+        // Barely warm. Enough to separate the lit faces from the shaded ones by hue as
+        // well as by brightness, which is what the eye actually reads form from — and far
+        // too little to misreport a colour the program asked for.
+        .setColor([1.0, 0.985, 0.96]))
       .setRotation([-0.3250576, -0.3250576, 0, 0.8880739]))
     .addChild(doc.createNode()
       .setExtension('KHR_lights_punctual', lightExt
         .createLight()
         .setType(LightDef.Type.DIRECTIONAL)
-        .setIntensity(0.5)
-        .setColor([1.0, 1.0, 1.0]))
+        .setIntensity(0.28)
+        .setColor([0.94, 0.96, 1.0]))
       .setRotation([0.6279631, 0.6279631, 0, 0.4597009]));
 
   const mesh = doc.createMesh();

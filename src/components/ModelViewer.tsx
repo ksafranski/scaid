@@ -617,11 +617,17 @@ export function ModelViewer({
         camera-target={HOME_TARGET}
         min-camera-orbit="auto auto 40mm"
         max-camera-orbit="auto auto 1200mm"
-        environment-image="neutral"
+        // "neutral" is built to show colour truthfully and lights from everywhere at once
+        // to do it, which leaves a pale object with no shading to read. "legacy" comes from
+        // fewer directions, so faces at different angles come back at different values.
+        environment-image="legacy"
         shadow-intensity="1.2"
         shadow-softness="0.6"
-        tone-mapping="neutral"
-        exposure="1.1"
+        // A shoulder on the highlights rather than a clip. A light grey object under the
+        // old setting ran out of headroom and went flat white wherever it faced the light,
+        // taking the shading with it.
+        tone-mapping="aces"
+        exposure="1.05"
         interaction-prompt="none"
         style={{
           width: "100%",
