@@ -132,6 +132,12 @@ const SNAPSHOT_BACKDROP = "#0b0e14"; // --color-ink-900, the preview panel's own
 /** Enough for a full-page picture in a document, without a megabyte of PNG. */
 const SNAPSHOT_MAX_EDGE = 1600;
 
+/** Room around the object in the picture, so it isn't jammed against the frame. */
+const SNAPSHOT_MARGIN = 1.15;
+
+/** The GLB is written at 1mm = 0.001 units — see `measure.ts`, which relies on the same. */
+const MM_PER_METER = 1000;
+
 /**
  * Trims the part of a snapshot where nothing was drawn.
  *
@@ -184,6 +190,57 @@ function contentBounds(
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
+/**
+ * Points the camera at the object, and hands back the undo.
+ *
+ * Keeps the angle and moves only the distance and what's being looked at, so the picture
+ * is of the thing they posed rather than of a different pose. The distance is worked out
+ * rather than guessed: a sphere around the object, dropped back far enough that it subtends
+ * the narrower of the two half-angles the viewport has — the vertical one on a wide panel,
+ * the horizontal one on a tall one, which is the one that would otherwise clip it.
+ *
+ * Returns a no-op when there's nothing measured to frame against, which leaves the view
+ * exactly as it is: a picture framed by hand beats one framed by a guess.
+ */
+function frameOnModel(viewer: ModelViewerElement, bounds: Bounds | null): () => void {
+  if (!bounds) return () => {};
+
+  const size = {
+    x: bounds.max.x - bounds.min.x,
+    y: bounds.max.y - bounds.min.y,
+    z: bounds.max.z - bounds.min.z,
+  };
+  const radius = Math.hypot(size.x, size.y, size.z) / 2 / MM_PER_METER;
+  if (!(radius > 0)) return () => {};
+
+  const orbit = viewer.getCameraOrbit();
+  const target = viewer.getCameraTarget();
+  const view = viewer.getBoundingClientRect();
+  if (!view.width || !view.height) return () => {};
+
+  const halfVertical = ((viewer.getFieldOfView() * Math.PI) / 180) / 2;
+  const halfHorizontal = Math.atan(Math.tan(halfVertical) * (view.width / view.height));
+  const distance = (radius / Math.sin(Math.min(halfVertical, halfHorizontal))) * SNAPSHOT_MARGIN;
+
+  // The middle of the object, on the axes model-viewer hangs things from — the same turn
+  // the hotspots undo, for the same reason.
+  const middle = {
+    x: (bounds.min.x + bounds.max.x) / 2,
+    y: (bounds.min.y + bounds.max.y) / 2,
+    z: (bounds.min.z + bounds.max.z) / 2,
+  };
+
+  viewer.cameraTarget = `${middle.x / MM_PER_METER}m ${middle.z / MM_PER_METER}m ${-middle.y / MM_PER_METER}m`;
+  viewer.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${distance}m`;
+  viewer.jumpCameraToGoal();
+
+  return () => {
+    viewer.cameraTarget = `${target.x}m ${target.y}m ${target.z}m`;
+    viewer.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${orbit.radius}m`;
+    viewer.jumpCameraToGoal();
+  };
+}
+
 /** Draws the viewer's transparent snapshot onto the studio's background. */
 async function flatten(snapshot: string): Promise<string | null> {
   const source = await new Promise<HTMLImageElement | null>((resolve) => {
@@ -232,15 +289,19 @@ export function ModelViewer({
   captureRef,
   snapshotRef,
   section,
-  sectionBounds,
+  modelBounds,
   onSection,
 }: {
   src: string | null;
   spinning: boolean;
   /** The cut currently being looked through, or null for the whole model. */
   section?: Section | null;
-  /** The whole model's extents, which bound where the cut can be placed. */
-  sectionBounds?: Bounds | null;
+  /**
+   * The whole model's extents, in plate millimeters.
+   *
+   * Bounds where a cut can be placed, and frames the picture the write-up takes.
+   */
+  modelBounds?: Bounds | null;
   onSection?: (section: Section | null) => void;
   /**
    * Filled in with a function the composer calls as it sends.
@@ -583,13 +644,31 @@ export function ModelViewer({
     snapshotRef.current = async () => {
       const viewer = viewerRef.current;
       if (!viewer || !modelShown) return null;
-      return flatten(viewer.toDataURL("image/png"));
+
+      // Frame the object before taking the picture, then put the view back.
+      //
+      // The viewport is set up for working in: the plate runs off every edge and the model
+      // sits somewhere in the middle of it. That's right for building and wrong for a
+      // picture, where the plate is context and the object is the subject — and a build
+      // plate is 220mm against an object that's often a tenth of that, so the subject
+      // arrives as a speck on a grid.
+      //
+      // Only the distance and the centre move. The angle is left exactly as they turned
+      // it, because which way the thing is facing is the part they chose.
+      const restore = frameOnModel(viewer, modelBounds ?? null);
+      try {
+        // Two frames: one for the camera to take the new goal, one to draw at it.
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return await flatten(viewer.toDataURL("image/png"));
+      } finally {
+        restore();
+      }
     };
 
     return () => {
       snapshotRef.current = null;
     };
-  }, [snapshotRef, modelShown]);
+  }, [snapshotRef, modelShown, modelBounds]);
 
   const resetView = useCallback(() => {
     const viewer = viewerRef.current;
@@ -950,12 +1029,12 @@ export function ModelViewer({
             Glyph={Ruler}
             label="Measure it"
           />
-          {onSection && sectionBounds && (
+          {onSection && modelBounds && (
             <ToolButton
               active={Boolean(section)}
               tone={SECTION_COLOR}
               onClick={() =>
-                chooseSection(section ? null : startingSection(sectionBounds))
+                chooseSection(section ? null : startingSection(modelBounds))
               }
               Glyph={SquareHalf}
               label="Cut it open"
@@ -972,11 +1051,11 @@ export function ModelViewer({
         </div>
       )}
 
-      {src && modelShown && section && sectionBounds && onSection && (
+      {src && modelShown && section && modelBounds && onSection && (
         <SectionControls
           key={section.axis}
           section={section}
-          bounds={sectionBounds}
+          bounds={modelBounds}
           onChange={chooseSection}
         />
       )}

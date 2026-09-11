@@ -13,6 +13,17 @@ export interface ModelViewerElement extends HTMLElement {
   cameraTarget: string;
   fieldOfView: string;
   jumpCameraToGoal(): void;
+  /**
+   * Where the camera is now, rather than where it was last told to go.
+   *
+   * The setters above take a goal the camera animates towards, and a person dragging the
+   * model moves it without touching them — so these are the only way to read a view back,
+   * which is what putting one back afterwards needs.
+   */
+  getCameraOrbit(): { theta: number; phi: number; radius: number };
+  getCameraTarget(): Vector3D;
+  /** Vertical field of view in degrees, resolved — `fieldOfView` may say "auto". */
+  getFieldOfView(): number;
   /** Snapshot of the rendered canvas — how a circled region gets its picture. */
   toDataURL(type?: string, encoderOptions?: number): string;
   /**

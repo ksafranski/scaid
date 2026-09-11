@@ -1233,7 +1233,7 @@ export function Studio({
             captureRef={captureMarkupRef}
             snapshotRef={snapshotRef}
             section={section}
-            sectionBounds={metrics && !metrics.empty ? metrics.bounds : null}
+            modelBounds={metrics && !metrics.empty ? metrics.bounds : null}
             onSection={setSection}
           />
 
