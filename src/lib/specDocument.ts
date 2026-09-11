@@ -224,7 +224,9 @@ export function toHtml(spec: SpecDocument): string {
   // travels in the Markdown export, which is the dependable route for it.
   if (spec.image) {
     parts.push(
-      `<p><img src="${spec.image}" alt="${escapeHtml(spec.name)}" width="640" /></p>`,
+      // Width rather than a fixed size: a word processor lays this out at whatever the
+      // page allows, and a picture cropped to its contents has no empty margin to waste.
+      `<p><img src="${spec.image}" alt="${escapeHtml(spec.name)}" style="width:100%;max-width:640px;height:auto" /></p>`,
     );
   }
 

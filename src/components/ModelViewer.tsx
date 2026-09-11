@@ -132,6 +132,58 @@ const SNAPSHOT_BACKDROP = "#0b0e14"; // --color-ink-900, the preview panel's own
 /** Enough for a full-page picture in a document, without a megabyte of PNG. */
 const SNAPSHOT_MAX_EDGE = 1600;
 
+/**
+ * Trims the part of a snapshot where nothing was drawn.
+ *
+ * The viewport is whatever shape the panel has been dragged to, and the model sits
+ * somewhere inside it with empty space above and around — on a tall narrow panel that's a
+ * third of the picture, gone to sky. Carried into a document, that empty space is what decides
+ * the picture's proportions, and a tall empty picture laid into a wide slot gets fitted by
+ * its height: a narrow strip down the middle of the page with the model tiny inside it.
+ *
+ * The viewer draws on transparency, so where nothing was drawn is exactly where the alpha
+ * is zero. Cropping to the rest gives a picture shaped like its contents.
+ */
+function contentBounds(
+  source: HTMLImageElement,
+): { x: number; y: number; width: number; height: number } | null {
+  const scan = document.createElement("canvas");
+  scan.width = source.naturalWidth;
+  scan.height = source.naturalHeight;
+
+  const context = scan.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  context.drawImage(source, 0, 0);
+
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, scan.width, scan.height).data;
+  } catch {
+    return null; // tainted canvas; the whole picture is still a picture
+  }
+
+  let minX = scan.width;
+  let minY = scan.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < scan.height; y++) {
+    for (let x = 0; x < scan.width; x++) {
+      // Anything but fully clear counts: the plate's grid lines and the model's own
+      // shadow are faint, and they're part of the picture.
+      if (pixels[(y * scan.width + x) * 4 + 3] > 4) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null; // nothing drawn at all
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
 /** Draws the viewer's transparent snapshot onto the studio's background. */
 async function flatten(snapshot: string): Promise<string | null> {
   const source = await new Promise<HTMLImageElement | null>((resolve) => {
@@ -142,16 +194,30 @@ async function flatten(snapshot: string): Promise<string | null> {
   });
   if (!source?.naturalWidth) return null;
 
-  const fit = Math.min(1, SNAPSHOT_MAX_EDGE / Math.max(source.naturalWidth, source.naturalHeight));
+  const crop =
+    contentBounds(source) ??
+    { x: 0, y: 0, width: source.naturalWidth, height: source.naturalHeight };
+
+  const fit = Math.min(1, SNAPSHOT_MAX_EDGE / Math.max(crop.width, crop.height));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(source.naturalWidth * fit);
-  canvas.height = Math.round(source.naturalHeight * fit);
+  canvas.width = Math.round(crop.width * fit);
+  canvas.height = Math.round(crop.height * fit);
 
   const context = canvas.getContext("2d");
   if (!context) return null;
   context.fillStyle = SNAPSHOT_BACKDROP;
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  context.drawImage(
+    source,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
   return canvas.toDataURL("image/png");
 }
 

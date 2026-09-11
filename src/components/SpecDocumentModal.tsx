@@ -191,13 +191,17 @@ export function SpecDocumentModal({ spec, onClose }: { spec: SpecDocument; onClo
           {/* The picture and the numbers belong side by side: the measurements are the
               caption the picture doesn't have. They stack on a narrow window. */}
           <div className="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <figure className="overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
+            <figure className="self-start overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
               {spec.image ? (
+                /* Fills the slot it's given. The picture is cropped to its own contents
+                   before it gets here, so its proportions are the model's rather than the
+                   panel's, and letting the height follow the width can't strand it in the
+                   middle of a box the way fitting it inside a fixed height did. */
                 /* eslint-disable-next-line @next/next/no-img-element -- a client-side data: URL */
                 <img
                   src={spec.image}
                   alt={`The ${spec.name} model`}
-                  className="max-h-[22rem] w-full object-contain"
+                  className="block h-auto w-full"
                 />
               ) : (
                 <div className="flex h-48 items-center justify-center px-6 text-center text-sm text-mist-500">
