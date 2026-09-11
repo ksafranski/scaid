@@ -4,10 +4,10 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { normalizeText } from "@/lib/emoji";
-import { ICON_NAMES } from "@/lib/iconNames";
 import { encodeEvent, type AgentEvent } from "@/lib/agentEvents";
 import { StreamedFields } from "@/lib/partialJson";
 import { findAdvice, findProblems } from "@/lib/scadLint";
+import { ActionField, IconField, reportIconDrift } from "@/lib/designSchema";
 import { PATTERN_INDEX, patternBrief } from "@/lib/scadPatterns/prompt";
 import { describeMeasurements } from "@/lib/geometry/facts";
 import { MAX_PLATE_MM, MIN_PLATE_MM } from "@/lib/types";
@@ -44,8 +44,7 @@ const ChoiceSchema = z.object({
  * kind of turn this is.
  */
 const DesignSchema = z.object({
-  action: z
-    .enum(["ask", "build"])
+  action: ActionField
     .describe(
       "'build' unless you genuinely cannot start without an answer. Default to building.",
     ),
@@ -98,8 +97,7 @@ const DesignSchema = z.object({
   steps: z
     .array(
       z.object({
-        icon: z
-          .enum(ICON_NAMES)
+        icon: IconField
           .describe(
             "The icon that best matches this step. Pick by meaning: a solid shape name for a part " +
               "you made, an operation for how you combined parts, a movement for how you placed " +
@@ -343,6 +341,10 @@ already stands for, or the dial will move half the model and leave the rest behi
 When you change a build, keep the dials that are still meaningful and keep their names, so a
 person who had set one doesn't lose it.
 
+The dials are not one of your build steps. Steps describe the shapes the object is made of, and
+a list of numbers isn't a shape — mention in the summary that the sizes are adjustable if it's
+worth saying, and leave the steps for the object itself.
+
 ## When they ask for a change
 You get the code you wrote last time. Change only what they asked about and keep everything else
 exactly as it was, so their build stays recognizable. Put what you changed in the summary — and
@@ -529,6 +531,11 @@ function friendlyApiError(error: unknown): string {
   }
   if (error instanceof Anthropic.APIError) {
     return "I couldn't reach my thinking brain just now. Please try again in a moment.";
+  }
+  // The answer arrived but didn't fit the shape it was asked for. Worth saying plainly:
+  // asking again usually works, where "something went wrong" suggests nothing at all.
+  if (error instanceof Error && /parse structured output/i.test(error.message)) {
+    return "My answer came back in a shape I couldn't read. Please ask me again!";
   }
   return "Something went wrong while I was building that. Please try again.";
 }
@@ -846,6 +853,10 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
     });
     return null;
   }
+
+  // The parsed copy has already had any unknown icon corrected, so the raw text is the
+  // only place left that remembers what was actually asked for.
+  reportIconDrift(json);
 
   const parsed = response.parsed_output;
   if (!parsed) {

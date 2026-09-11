@@ -239,6 +239,31 @@ function toLiteral(value: number | boolean | string, kind: ParameterKind): strin
   return null;
 }
 
+/**
+ * How far one nudge of a control should move, when the program didn't say.
+ *
+ * A whole number between whole bounds is a count of something — grooves, sides, ribs — and
+ * half of one is not a thing that exists. Anything written with a decimal point is a
+ * measurement, where halves and tenths are exactly what someone wants to reach for.
+ *
+ * A program that wants finer than this says so: `[0.3:0.1:2]` is always obeyed.
+ */
+export function stepFor(parameter: Parameter): number {
+  if (parameter.step !== undefined) return parameter.step;
+  if (parameter.min === undefined || parameter.max === undefined) return 1;
+
+  const counts =
+    Number.isInteger(parameter.value as number) &&
+    Number.isInteger(parameter.min) &&
+    Number.isInteger(parameter.max);
+  if (counts) return 1;
+
+  const span = parameter.max - parameter.min;
+  if (span <= 5) return 0.1;
+  if (span <= 50) return 0.5;
+  return 1;
+}
+
 /** Keeps the program's own order while collecting the controls under their headings. */
 export function groupParameters(
   parameters: Parameter[],

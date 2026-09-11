@@ -129,6 +129,7 @@ without the library and renders both answers, for checking the claim rather than
 | --- | --- |
 | `npm run verify:patterns` | Grade every technique in the pattern library against BOSL2. |
 | `npm run verify:geometry` | Grade the measurements against solids with known answers. |
+| `npm run verify:agent` | Check the design response survives a model going off-menu. |
 | `npm run verify:patterns thread` | Grade just the patterns whose id matches. |
 | `npm run ab:patterns "..."` | Ask the real agent the same thing with and without the library. |
 
@@ -153,6 +154,10 @@ separately. It costs a little more work and removes a whole category of bug: the
 every number, so the code you read, the model you see, the STL you download and the program the
 agent is handed next turn cannot disagree about how tall it is. It also means you watch the number
 change in the code as you drag, which is most of the point — the dial teaches what it does.
+
+A dial that the program didn't give a step to moves in whole numbers when the program wrote whole
+numbers, because a count of grooves has no half. Anything written with a decimal point moves in
+tenths or halves instead.
 
 Only a number, `true`/`false`, or one of a listed set of strings is ever written. OpenSCAD parses
 these as expressions, so a value carrying a semicolon would be a second statement, and a value that
@@ -212,6 +217,7 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/lib/scadPatterns/` | The verified OpenSCAD technique library and its prompt injection |
 | `src/lib/geometry/` | Measuring the mesh, saying it in words, and cutting the model open |
 | `src/lib/scadParameters.ts`, `src/components/Dials.tsx` | The sizes at the top of a program, and the sliders they become |
+| `src/lib/designSchema.ts` | The response fields that correct a model rather than reject it |
 | `scripts/verify-geometry.mjs` | Grades the measurements against known solids — `npm run verify:geometry` |
 | `scripts/verify-patterns.mjs` | Grades every pattern against BOSL2 — `npm run verify:patterns` |
 | `scripts/lib/scad-render.mjs` | Renders and measures OpenSCAD in Node, using the browser's own wasm |

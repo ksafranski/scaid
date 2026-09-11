@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Sliders } from "@phosphor-icons/react";
 import { Dropdown } from "./Dropdown";
-import { groupParameters, type Parameter } from "@/lib/scadParameters";
+import { groupParameters, stepFor, type Parameter } from "@/lib/scadParameters";
 
 /**
  * The model's own numbers, as things you can move.
@@ -153,7 +153,7 @@ function NumberDial({
   }
 
   const hasRange = parameter.min !== undefined && parameter.max !== undefined;
-  const step = parameter.step ?? guessStep(parameter);
+  const step = stepFor(parameter);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -192,15 +192,6 @@ function NumberDial({
       )}
     </div>
   );
-}
-
-/** A step fine enough to be useful over the range, when the program didn't pick one. */
-function guessStep(parameter: Parameter): number {
-  if (parameter.min === undefined || parameter.max === undefined) return 1;
-  const span = parameter.max - parameter.min;
-  if (span <= 5) return 0.1;
-  if (span <= 50) return 0.5;
-  return 1;
 }
 
 /** Drops the trailing zeros a slider's step leaves behind. */

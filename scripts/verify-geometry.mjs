@@ -22,7 +22,7 @@ const { estimateMaterial } = await import("../src/lib/geometry/materials.ts");
 const { sectionSource, sectionRange, defaultPosition, startingAxis } = await import(
   "../src/lib/geometry/section.ts"
 );
-const { parseParameters, setParameter } = await import("../src/lib/scadParameters.ts");
+const { parseParameters, setParameter, stepFor } = await import("../src/lib/scadParameters.ts");
 
 const filter = process.argv[2];
 
@@ -436,6 +436,23 @@ difference() {
     if (!(filled.volume > hollow.volume * 2)) {
       throw new Error(`solid measured ${filled.volume}, hollow ${hollow.volume}`);
     }
+  }),
+
+  check("dials › a count moves in whole numbers, a measurement doesn't", async () => {
+    // Straight off a real build: the agent wrote `ring_count = 3; // [0:6]` for the number
+    // of grooves in a coaster. Offered in halves, that dial can commit three and a half
+    // grooves, which is not a thing a coaster can have.
+    const found = parseParameters(`ring_count = 3;   // Grooves in the floor [0:6]
+diameter = 95;    // Across the top [60:140]
+wall = 2.5;       // Wall thickness [1:5]
+ring_depth = 0.8; // How deep they cut [0.3:0.1:2]
+span = 400;       // A long way [0:1000]`);
+    const step = (name) => stepFor(found.find((p) => p.name === name));
+    near(step("ring_count"), 1, 0, "step for a count");
+    near(step("diameter"), 1, 0, "step for whole millimetres");
+    near(step("wall"), 0.1, 0, "step for a small measurement");
+    near(step("ring_depth"), 0.1, 0, "a stated step is always obeyed");
+    near(step("span"), 1, 0, "step over a wide whole range");
   }),
 
   check("dials › a value that isn't one is refused rather than compiled", async () => {
