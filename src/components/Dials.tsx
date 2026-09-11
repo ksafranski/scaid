@@ -25,31 +25,43 @@ export function Dials({
 }) {
   if (!parameters.length) return null;
 
+  // The same two-part shape the code and readme panels have: a line of context in the
+  // margin, then one bordered box holding the thing itself. Three panels that each framed
+  // their contents differently would make switching between them feel like moving between
+  // three applications.
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-1 pb-6">
-      <p className="flex items-center gap-1.5 pb-3 text-xs text-mist-500">
-        <Sliders size={14} weight="duotone" className="shrink-0 text-volt-400" />
-        Move one and the model rebuilds — the number changes in the code too.
-      </p>
+    <div className="flex h-full flex-col">
+      {/* The code and readme panels get this row's height from the controls in it — a Copy
+          button, a pair of tabs. There's nothing to put here but a line of text, so the
+          height is set to match theirs rather than left to the text, which would slide the
+          box up by fifteen pixels every time someone switched to this panel. */}
+      <div className="flex min-h-[2.5rem] shrink-0 items-center justify-between gap-4 px-5 pb-2.5">
+        <p className="flex items-center gap-1.5 text-xs text-mist-500">
+          <Sliders size={14} weight="duotone" className="shrink-0 text-volt-400" />
+          Move one and the model rebuilds — the number changes in the code too.
+        </p>
+      </div>
 
-      <div className="flex flex-col gap-5">
-        {groupParameters(parameters).map(({ group, parameters: within }) => (
-          <div key={group ?? "__ungrouped"} className="flex flex-col gap-4">
-            {group && (
-              <p className="text-[10px] font-semibold tracking-[0.08em] text-mist-500 uppercase">
-                {group}
-              </p>
-            )}
-            {within.map((parameter) => (
-              <Dial
-                key={parameter.name}
-                parameter={parameter}
-                onChange={onChange}
-                disabled={disabled}
-              />
-            ))}
-          </div>
-        ))}
+      <div className="mx-5 mb-5 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-ink-700 bg-ink-950 p-4">
+        <div className="flex flex-col gap-5">
+          {groupParameters(parameters).map(({ group, parameters: within }) => (
+            <div key={group ?? "__ungrouped"} className="flex flex-col gap-4">
+              {group && (
+                <p className="text-[10px] font-semibold tracking-[0.08em] text-mist-500 uppercase">
+                  {group}
+                </p>
+              )}
+              {within.map((parameter) => (
+                <Dial
+                  key={parameter.name}
+                  parameter={parameter}
+                  onChange={onChange}
+                  disabled={disabled}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
