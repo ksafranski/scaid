@@ -24,6 +24,9 @@ const { sectionSource, sectionRange, defaultPosition, startingAxis } = await imp
 );
 const { parseParameters, setParameter, stepFor } = await import("../src/lib/scadParameters.ts");
 const { stances, betterStance, turnSource, STANCES } = await import("../src/lib/geometry/orientation.ts");
+const { checkExpectations, misses, describeMisses, MEASURABLES } = await import(
+  "../src/lib/geometry/expectations.ts"
+);
 
 const filter = process.argv[2];
 
@@ -579,6 +582,86 @@ union() {
   }),
 ];
 
+/**
+ * The agent held to what it said.
+ *
+ * A claim is only worth making if it can fail, so most of these are about failing: a size
+ * that's wrong has to be caught, and a claim that couldn't have been wrong has to be told
+ * apart from one that was checked and passed.
+ */
+const EXPECTATIONS = [
+  check("promises › a size that's right passes and a size that's wrong doesn't", async () => {
+    const report = await inspect("cube([40, 30, 20]);");
+    const results = checkExpectations(
+      [
+        { what: "the width", measure: "width", value: 40, tolerance: 0.5 },
+        { what: "the depth", measure: "depth", value: 30, tolerance: 0.5 },
+        { what: "the height", measure: "height", value: 25, tolerance: 0.5 },
+      ],
+      report,
+    );
+    is(results[0].ok, true, "40 against 40");
+    is(results[1].ok, true, "30 against 30");
+    is(results[2].ok, false, "25 against 20");
+    is(misses(results).length, 1, "how many missed");
+    near(misses(results)[0].actual, 20, 1e-6, "what it really measures");
+
+    // The repair pass is told which number, what was promised, and what came out.
+    const fault = describeMisses(results);
+    for (const fragment of ["height", "25", "20"]) {
+      if (!fault.includes(fragment)) throw new Error(`the fault doesn't mention ${fragment}`);
+    }
+  }),
+
+  check("promises › the edge of the tolerance is inside it", async () => {
+    const report = await inspect("cube([40, 30, 20]);");
+    const at = (value, tolerance) =>
+      checkExpectations([{ what: "the width", measure: "width", value, tolerance }], report)[0].ok;
+    is(at(40.5, 0.5), true, "exactly at the edge");
+    is(at(40.51, 0.5), false, "just past it");
+  }),
+
+  check("promises › a claim nothing could fail is not counted as checked", async () => {
+    const report = await inspect("cube([40, 30, 20]);");
+    const vacuous = checkExpectations(
+      [{ what: "the width", measure: "width", value: 40, tolerance: 999 }],
+      report,
+    )[0];
+    is(vacuous.ok, true, "it doesn't fail");
+    if (!vacuous.skipped) throw new Error("a tolerance that swallows the value passed as a real check");
+
+    const zero = checkExpectations(
+      [{ what: "the width", measure: "width", value: 40, tolerance: 0 }],
+      report,
+    )[0];
+    if (!zero.skipped) throw new Error("a zero tolerance passed as a real check");
+  }),
+
+  check("promises › volume isn't judged on a shape that doesn't close", async () => {
+    const { off } = await render("cube(20);", { includeOff: true });
+    const holed = inspectMesh(parseOff(dropFaces(off, 1)));
+    const result = checkExpectations(
+      [{ what: "the volume", measure: "volume", value: 8000, tolerance: 10 }],
+      holed,
+    )[0];
+    is(result.ok, true, "not failed");
+    is(result.actual, null, "and not measured either");
+    if (!result.skipped) throw new Error("it was treated as a real check");
+  }),
+
+  check("promises › nothing may be claimed that isn't really measured", async () => {
+    // Wall thickness and hole diameter are the two worth checking and neither can be yet.
+    // If either appears here without a ray cast behind it, this feature is lying.
+    is(MEASURABLES.join(","), "width,depth,height,volume", "what may be claimed");
+  }),
+
+  check("promises › an empty list is not a failure", async () => {
+    const report = await inspect("cube(10);");
+    is(checkExpectations([], report).length, 0, "no claims, no results");
+    is(misses(checkExpectations([], report)).length, 0, "and nothing missed");
+  }),
+];
+
 function offLines(off) {
   const lines = off.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const header = /^OFF\s+\S/.test(lines[0]) ? 0 : 1;
@@ -624,7 +707,7 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS]) {
   if (!item) continue;
   const started = Date.now();
   try {

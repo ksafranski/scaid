@@ -11,6 +11,7 @@
  */
 import type { IconName } from "./iconNames";
 import type { BuildStep } from "./types";
+import type { Expectation } from "./geometry/expectations";
 
 /** What the agent is doing right now. The UI turns these into a line of copy. */
 export type AgentStage =
@@ -52,6 +53,13 @@ export interface AgentDesign {
   code: string;
   /** Only for a request that carried several distinct requirements. */
   requirements?: AgentRequirement[];
+  /**
+   * Sizes this build is committing to, checked against the mesh once it renders.
+   *
+   * Belongs to the turn rather than to the object: the moment anyone edits the code, the
+   * agent hasn't promised anything about what's there now.
+   */
+  expectations?: Expectation[];
   checkpoint?: AgentCheckpoint;
 }
 

@@ -59,6 +59,15 @@ export interface RenderState {
    * the thing, not a different thing, and these numbers are handed to the design agent.
    */
   metrics: GeometryReport | null;
+  /**
+   * The program those measurements were taken from.
+   *
+   * A new design arrives before its model does, so for a second or two `metrics` still
+   * describes the last one. Anything comparing a build against what it was supposed to be
+   * has to know it is looking at the right build — without this, a new model's promises get
+   * checked against the old model's measurements, and it fails for the previous one's size.
+   */
+  measuredCode: string | null;
   /** The cut currently being looked through, or null for the whole model. */
   section: Section | null;
   /** A better way up, when there is one worth the interruption. */
@@ -87,6 +96,7 @@ export function useScadRenderer(plateSizeMm: number) {
     error: null,
     size: null,
     metrics: null,
+    measuredCode: null,
     section: null,
     advice: null,
   });
@@ -182,6 +192,7 @@ export function useScadRenderer(plateSizeMm: number) {
           setState((prev) => ({
             ...prev,
             metrics,
+            measuredCode: request?.code ?? null,
             size: metrics.empty ? null : metrics.size,
             advice: null, // whatever was advised was about the model before this one
           }));
@@ -273,6 +284,7 @@ export function useScadRenderer(plateSizeMm: number) {
       error: null,
       size: null,
       metrics: null,
+      measuredCode: null,
       section: null,
       advice: null,
     });
