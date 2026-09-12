@@ -1111,7 +1111,13 @@ export function Studio({
       </TopBar>
 
       {/* One toolbar for the workspace: what's on the left, and what you can do with it. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-850 px-4 py-2.5">
+      <div
+        // A layer of its own, above the workspace below. Its menus hang down over the
+        // model, and the viewer has its own floating chrome up in that same corner — so
+        // rather than have each popover outbid each tool one number at a time, the row
+        // itself outranks the whole of <main>, and nothing inside the viewer can reach it.
+        className="relative z-10 flex shrink-0 flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-850 px-4 py-2.5"
+      >
         <div className="flex gap-1 rounded-xl bg-ink-900 p-1">
           <ViewButton active={shownView === "chat"} onClick={() => setView("chat")} Glyph={ChatCircleDots}>
             Chat
@@ -1207,7 +1213,9 @@ export function Studio({
         // The width is shared by both views and set by the drag handle, so switching
         // between chat and code never shifts the layout under you.
         style={{ "--panel-width": `${panelWidth}px` } as React.CSSProperties}
-        className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[var(--panel-width)_1fr]"
+        // z-0 makes the workspace a single layer, so the toolbar's menus sit over all of
+        // it however the panels stack things internally.
+        className="relative z-0 grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[var(--panel-width)_1fr]"
       >
         {/* Left panel: the conversation, the code you can edit, or your write-up */}
         <section className="relative flex min-h-0 flex-col border-ink-700 bg-ink-850 lg:border-r">
