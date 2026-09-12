@@ -61,6 +61,14 @@ export interface AgentDesign {
    */
   expectations?: Expectation[];
   checkpoint?: AgentCheckpoint;
+  /**
+   * Which worked techniques the build was made from.
+   *
+   * Server-derived rather than something the model says, and handed back on the next turn
+   * so the agent keeps seeing the verified source for its own work. Belongs to the object:
+   * a snap fit built on turn one is still a snap fit on turn nine.
+   */
+  patternIds?: string[];
 }
 
 export type AgentEvent =

@@ -4,6 +4,7 @@ import { getDb } from "@/lib/mongodb";
 import { requireUser } from "@/lib/auth";
 import { toCreation, type BuildStep, type CreationDoc } from "@/lib/types";
 import { MAX_VERSIONS, type Version } from "@/lib/versions";
+import { getPattern } from "@/lib/scadPatterns";
 
 /**
  * The history, checked before it is stored.
@@ -59,7 +60,8 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Please log in first." }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { id, name, prompt, code, description, summary, steps, readme, versions } = body ?? {};
+  const { id, name, prompt, code, description, summary, steps, readme, versions, patternIds } =
+    body ?? {};
 
   // A readme on its own is a saveable record: a plan written before the model exists is
   // still work worth keeping. Only a record with neither is nothing at all.
@@ -86,6 +88,12 @@ export async function POST(request: Request) {
     // Trimmed here as well as in the browser. The cap is what keeps a record from growing
     // without limit over a long afternoon, and a cap only the client honours isn't one.
     versions: sanitizeVersions(versions),
+    // Provenance, kept because it can't be worked out again from the code. Checked against
+    // the real library rather than stored as given: an id nobody recognises would come back
+    // on the next turn and throw where the patterns are resolved.
+    patternIds: Array.isArray(patternIds)
+      ? patternIds.filter((id: unknown): id is string => typeof id === "string" && getPattern(id) !== undefined).slice(0, 12)
+      : [],
     updatedAt: now,
   };
 

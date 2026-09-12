@@ -22,6 +22,8 @@ export interface StoredDesign {
   summary: string;
   steps: BuildStep[];
   code: string;
+  /** Which worked techniques it was made from — provenance, and not re-derivable. */
+  patternIds?: string[];
 }
 
 export interface StudioSnapshot {

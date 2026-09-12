@@ -63,6 +63,16 @@ export interface CreationDoc {
    * least likely to need it.
    */
   versions?: Version[];
+  /**
+   * Which worked techniques the build was made from.
+   *
+   * Stored rather than recomputed, which is the opposite of the rule for measurements —
+   * and for the opposite reason. A measurement can always be taken again off the mesh, so
+   * storing one only lets it go stale. Provenance cannot be taken again: the agent is told
+   * to paste a pattern in and rename it to suit the object, so by the time the build is
+   * saved nothing in the code says where it came from. Absent on anything saved before this.
+   */
+  patternIds?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -79,6 +89,7 @@ export interface Creation {
   readme?: string;
   titled?: boolean;
   versions?: Version[];
+  patternIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -110,6 +121,7 @@ export function toCreation(doc: CreationDoc): Creation {
     readme: doc.readme,
     titled: doc.titled,
     versions: doc.versions,
+    patternIds: doc.patternIds,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

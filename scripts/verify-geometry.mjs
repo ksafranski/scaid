@@ -34,6 +34,7 @@ const { record, measured, describeChange, ago, MAX_VERSIONS, HAND_EDIT } = await
 );
 const { toMeasured } = await import("../src/lib/geometry/facts.ts");
 const { requestedColors } = await import("../src/lib/scadColors.ts");
+const { selectPatterns, patternBrief } = await import("../src/lib/scadPatterns/prompt.ts");
 
 const filter = process.argv[2];
 
@@ -1050,7 +1051,94 @@ function duplicateFirstFace(off) {
   return rebuild(parsed, [faces[0], ...faces]);
 }
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS, ...COLOURS]) {
+/**
+ * Which worked techniques a turn is shown.
+ *
+ * The failure this guards against is silent and was measured in the running app: a build
+ * made from five patterns came back on its next turn selecting one, because the agent is
+ * told to paste pattern code in and rename it, and renaming is what the code-based detector
+ * was reading. The turn that edits the snap fit was the turn that could no longer see how a
+ * snap fit is made — and nothing about that shows up as an error.
+ */
+const SELECTION = [
+  check("patterns › a request's words still pick them", () => {
+    const ids = selectPatterns({ prompt: "a threaded bottle cap" }).map((p) => p.id);
+    if (!ids.includes("iso-thread")) throw new Error(`no thread pattern in [${ids}]`);
+    is(selectPatterns({ prompt: "a plain coaster" }).length, 0, "patterns for a prompt that needs none");
+  }),
+
+  check("patterns › a build carries its own provenance forward", () => {
+    // The message says nothing about threads. The build is still a threaded thing.
+    const ids = selectPatterns({
+      prompt: "make the walls a bit thicker",
+      currentCode: "cylinder(h = 20, r = 15);",
+      remembered: ["iso-thread"],
+    }).map((p) => p.id);
+    if (!ids.includes("iso-thread")) throw new Error(`provenance lost: [${ids}]`);
+  }),
+
+  check("patterns › a remembered id outranks a keyword", () => {
+    // Six matches plus a remembered one is over the cap, so something has to go. What the
+    // build is made of is worth more than a word that happened to appear in the request.
+    const ids = selectPatterns({
+      prompt: "a box with a snap-fit lid, a hinge, rounded edges, a fillet and a thread",
+      remembered: ["bearing-seat"],
+    }).map((p) => p.id);
+    if (!ids.includes("bearing-seat")) throw new Error(`remembered id dropped: [${ids}]`);
+  }),
+
+  check("patterns › an id nobody recognises is dropped, not thrown on", () => {
+    // These arrive from a browser. withDependencies throws on an unknown id, so the filter
+    // has to happen before it — a saved record from an older library must still open.
+    const ids = selectPatterns({
+      prompt: "a coaster",
+      remembered: ["iso-thread", "not-a-pattern", "", "../../etc/passwd"],
+    }).map((p) => p.id);
+    is(JSON.stringify(ids), JSON.stringify(["iso-thread"]), "what survived");
+  }),
+
+  check("patterns › a plain follow-up renders the same bytes", () => {
+    // This is what makes the brief cacheable across the turns of one build, and the reason
+    // it gets a breakpoint of its own. Most follow-ups name nothing new, so the selection
+    // is the remembered set and the text is identical.
+    const remembered = ["snap-fit", "rounded-box", "hollow-shell"];
+    const first = patternBrief({ prompt: "make it taller", remembered });
+    for (const later of ["make the walls a bit thicker", "a bit shorter please", "make the base wider"]) {
+      is(patternBrief({ prompt: later, remembered }).text, first.text, `the brief for "${later}"`);
+    }
+    if (!first.text) throw new Error("nothing was selected, so this proved nothing");
+  }),
+
+  check("patterns › a request that names something new is allowed to add to it", () => {
+    // The flip side, and correct: asking for a lip should hand over the lip pattern. That
+    // turn pays a cache write instead of a read, which is the price of being right.
+    const remembered = ["snap-fit", "rounded-box", "hollow-shell"];
+    const ids = selectPatterns({ prompt: "add a lip round the top edge", remembered }).map((p) => p.id);
+    if (!ids.includes("stacking-lip")) throw new Error(`lip pattern not offered: [${ids}]`);
+    for (const carried of remembered) {
+      if (!ids.includes(carried)) throw new Error(`${carried} was dropped for a new match: [${ids}]`);
+    }
+  }),
+
+  check("patterns › order comes from the library, not from the scores", () => {
+    // Without this the brief reshuffles whenever a word in the request changes relevance,
+    // and a prefix that changes is not a cached prefix.
+    const emphasisOnThread = selectPatterns({ prompt: "a thread", remembered: ["rounded-box"] });
+    const ids = emphasisOnThread.map((p) => p.id);
+    is(JSON.stringify(ids), JSON.stringify(["rounded-box", "iso-thread"]), "library order");
+  }),
+
+  check("patterns › carrying provenance can't grow the brief without limit", () => {
+    // A build worked on for a month shouldn't accumulate the whole library.
+    const everything = selectPatterns({ prompt: "" , remembered: [
+      "iso-thread", "spur-gear", "snap-fit", "rounded-box", "hollow-shell", "stacking-lip",
+      "bearing-seat", "fillet-joint", "printable-clearance", "print-in-place-hinge",
+    ] });
+    if (everything.length > 10) throw new Error(`${everything.length} patterns selected, cap is meant to bite`);
+  }),
+];
+
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS, ...COLOURS, ...SELECTION]) {
   if (!item) continue;
   const started = Date.now();
   try {

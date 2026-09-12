@@ -22,6 +22,20 @@ const client = new Anthropic();
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
 
+/**
+ * The repair pass runs on a smaller model than the design pass.
+ *
+ * Designing is open-ended: it decides what the object is, picks the shapes, and writes the
+ * explanation someone learns from. Repair is the opposite — a named fault in a program that
+ * already exists, with the compiler's own message attached and an instruction to change
+ * nothing else. It is the one job here that comes with ground truth, and the narrowest, so
+ * it does not need the biggest model and the saving is several-fold on every failed build.
+ *
+ * Set ANTHROPIC_REPAIR_MODEL to put it back on the design model if a repair ever comes back
+ * worse than the failure it was fixing.
+ */
+const REPAIR_MODEL = process.env.ANTHROPIC_REPAIR_MODEL || "claude-sonnet-5";
+
 /** A one-tap reply: what the button says, and what gets sent when it's pressed. */
 const ChoiceSchema = z.object({
   label: z
@@ -545,6 +559,13 @@ const RequestSchema = z.object({
     .optional(),
   /** The plate it has to fit on. Known even before anything has been built. */
   plateSizeMm: z.number().int().min(MIN_PLATE_MM).max(MAX_PLATE_MM).optional(),
+  /**
+   * Which worked techniques this build was made from, handed back from the last turn.
+   *
+   * Unknown ids are dropped rather than trusted, and the count is capped, so the worst a
+   * caller can do with this is ask for patterns that were going to be free anyway.
+   */
+  patternIds: z.array(z.string().max(60)).max(12).optional(),
   /** Present when the browser's renderer rejected code we just produced. */
   repair: z
     .object({
@@ -645,16 +666,23 @@ async function repairCode(args: {
   code: string;
   fault: string;
   goal?: string;
+  /** What the build was made from, when the caller knows. */
+  patternIds?: string[];
   send?: Send;
   signal: AbortSignal;
 }) {
-  // Only the patterns the failing program actually uses — an empty prompt scores nothing,
-  // so this is driven entirely by what the code calls.
-  const { text: patterns, ids } = patternBrief({ prompt: "", currentCode: args.code });
+  // What the failing program was made of. Reading it off the code alone would miss anything
+  // the agent renamed, which is most of it — so the remembered list is the real source and
+  // the code is the fallback for a repair that arrives without one.
+  const { text: patterns, ids } = patternBrief({
+    prompt: "",
+    currentCode: args.code,
+    remembered: args.patternIds,
+  });
   if (ids.length) console.log(`[repair] patterns: ${ids.join(", ")}`);
 
   const stream = client.messages.stream({
-    model: MODEL,
+    model: REPAIR_MODEL,
     max_tokens: 64000,
     thinking: { type: "adaptive" },
     system: [
@@ -799,6 +827,7 @@ async function runRepair(body: Body, send: Send, signal: AbortSignal) {
     code: repair.code,
     fault: `OpenSCAD reported:\n${repair.error}`,
     goal: repair.goal,
+    patternIds: body.patternIds,
     send,
     signal,
   });
@@ -880,7 +909,7 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
     { role: "user" as const, content },
   ];
 
-  const patterns = patternBrief({ prompt, currentCode });
+  const patterns = patternBrief({ prompt, currentCode, remembered: body.patternIds });
   if (patterns.ids.length) console.log(`[design] patterns: ${patterns.ids.join(", ")}`);
 
   send({ t: "stage", stage: "thinking" });
@@ -916,14 +945,20 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
       // Chosen from this turn's request, so it must sit after the breakpoint above or the
       // cached prefix would change on every call and never hit.
       //
-      // Not given a cache breakpoint of its own, though it looks like it should have one:
-      // measured at 3,701 tokens on a five-pattern build, re-sent every turn. The selection
-      // isn't stable enough to cache. It keys partly off modules the program calls, and the
-      // agent is told to paste pattern code in and rename it to suit the object — so the
-      // same build came back with five patterns on the first turn and one on the second.
-      // A breakpoint on bytes that change costs 1.25x for nothing. Worth revisiting if the
-      // build ever remembers which patterns it was made from.
-      ...(patterns.text ? [{ type: "text" as const, text: patterns.text }] : []),
+      // Given a breakpoint of its own, because the selection is now stable across the turns
+      // of one build: it is remembered rather than re-derived, and a chosen set always
+      // renders in library order. Measured at 3,701 tokens on a five-pattern build, which
+      // was 28% of a low-thinking turn's bill and paid again every turn. It cost 1.25x once
+      // and 0.1x after that.
+      ...(patterns.text
+        ? [
+            {
+              type: "text" as const,
+              text: patterns.text,
+              cache_control: { type: "ephemeral" as const, ttl: "1h" as const },
+            },
+          ]
+        : []),
     ],
     messages,
     // Effort is the supported way to trade thinking depth against time; budget_tokens is
@@ -1028,6 +1063,7 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
       code,
       fault: problems.map((problem) => problem.detail).join("\n"),
       goal: parsed.description,
+      patternIds: patterns.ids,
       send,
       signal,
     });
@@ -1039,6 +1075,9 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
 
   // ...and models sometimes emit "🧊" as literal text instead of the emoji it encodes.
   return {
+    // What this build is made from, so the turn after this one still knows. Nothing else
+    // can work it out: the agent is told to paste these in and rename them.
+    patternIds: patterns.ids,
     name: normalizeText(parsed.name),
     description: normalizeText(parsed.description),
     summary: normalizeText(parsed.summary),

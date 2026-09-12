@@ -95,6 +95,13 @@ interface Design {
   expectations?: Expectation[];
   /** Where to pause and decide what happens next. Absent on anything saved before this. */
   checkpoint?: AgentCheckpoint;
+  /**
+   * Which worked techniques it was made from, carried forward every turn.
+   *
+   * Unlike expectations this belongs to the object rather than the turn, and survives a
+   * hand-edit: renaming a module doesn't stop the build being a snap-fit box.
+   */
+  patternIds?: string[];
 }
 
 type Message =
@@ -279,7 +286,13 @@ export function Studio({
    * Auto-repair only fires for code that came from the agent and hasn't been touched since —
    * an error while someone is editing their own code is theirs to fix, not ours to overwrite.
    */
-  const repairRef = useRef<{ code: string; goal: string; attempts: number } | null>(null);
+  const repairRef = useRef<{
+    code: string;
+    goal: string;
+    /** What the build was made from, so a repair sees the same verified source it did. */
+    patternIds?: string[];
+    attempts: number;
+  } | null>(null);
 
   /** Whether the view should keep following the bottom of the conversation. */
   const followingRef = useRef(true);
@@ -568,6 +581,9 @@ export function Studio({
         prompt: trimmed,
         currentCode: design?.code,
         requirements: design?.requirements,
+        // So the agent keeps seeing the worked techniques this build was made from. Nothing
+        // in the code still says so by turn two — it was pasted in and renamed.
+        patternIds: design?.patternIds,
         // What the thing on screen actually came out as, so the next turn reasons about
         // the object rather than about what it meant to build.
         measured: metrics ? (toMeasured(metrics) ?? undefined) : undefined,
@@ -584,7 +600,12 @@ export function Studio({
       setLastPrompt(trimmed);
       setMessages((prev) => [...prev, { kind: "scaid", design: built }]);
       // Arm the repair loop: if this code doesn't compile, it's ours to fix.
-      repairRef.current = { code: built.code, goal: built.description || trimmed, attempts: 0 };
+      repairRef.current = {
+        code: built.code,
+        goal: built.description || trimmed,
+        patternIds: built.patternIds,
+        attempts: 0,
+      };
       loadDesign(built);
     } catch (error) {
       // Being stopped isn't a failure, and Start new has already cleared the conversation
@@ -623,6 +644,10 @@ export function Studio({
         const fixed = await streamAgent({
           prompt: "Fix the build error.",
           repair: { code: target.code, error: detail, goal: target.goal },
+          // Carried on the ref rather than read off `design`, so a fix is always judged
+          // against the build that actually failed — and so this doesn't have to re-run
+          // every time the design changes.
+          patternIds: target.patternIds,
         });
         if (!fixed) return;
 

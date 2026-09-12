@@ -57,7 +57,8 @@ Fill in `.env.local`:
 | `MONGODB_DB` | Database name. Defaults to `scaid`. |
 | `SESSION_SECRET` | Signs the login cookie. Generate with `openssl rand -base64 32`. |
 | `ANTHROPIC_API_KEY` | Powers the design agent. Get one from the [Anthropic Console](https://console.anthropic.com/settings/keys). |
-| `ANTHROPIC_MODEL` | Optional. Defaults to `claude-opus-5`. |
+| `ANTHROPIC_MODEL` | Optional. The design pass. Defaults to `claude-opus-5`. |
+| `ANTHROPIC_REPAIR_MODEL` | Optional. The repair pass, which fixes a named fault in code that already exists. Defaults to `claude-sonnet-5` — a narrower job than designing, with the compiler's own message to work from. |
 | `SIGNUP_CODE` | Optional. Beta signup gate; defaults to `scaidtester`. |
 
 Then:

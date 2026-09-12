@@ -1,4 +1,4 @@
-import { PATTERNS, withDependencies } from "./index";
+import { PATTERNS, getPattern, withDependencies } from "./index";
 import type { ScadPattern } from "./types";
 
 /**
@@ -25,6 +25,9 @@ function makeMatcher(trigger: string): RegExp {
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, "i");
 }
 
+/** Library order, so a chosen set always renders in the same sequence. */
+const ORDER = new Map<string, number>(PATTERNS.map((pattern, index) => [pattern.id, index]));
+
 const MATCHERS = new Map<string, RegExp[]>(
   PATTERNS.map((pattern) => [pattern.id, pattern.triggers.map(makeMatcher)]),
 );
@@ -44,7 +47,24 @@ export interface SelectionInput {
   prompt: string;
   /** The program as it stands, if this is a change to an existing build. */
   currentCode?: string;
+  /**
+   * What this build was made from on an earlier turn, handed back by the studio.
+   *
+   * The two live routes in — the words of the request, and the modules the program calls —
+   * both go quiet after the first turn. The words move on ("make the walls thicker" says
+   * nothing about snap fits), and the agent is told to paste pattern code in and rename it
+   * to suit the object, which is the right instruction and takes the module names with it.
+   * Measured on a real build: five patterns on the first turn, one on the second. So the
+   * turn that edits the snap fit is the turn that can no longer see how a snap fit is made.
+   *
+   * Provenance can't be recovered by looking at the result, which is why it is remembered
+   * rather than recomputed.
+   */
+  remembered?: string[];
 }
+
+/** How many remembered patterns a build may carry. */
+const MAX_REMEMBERED = 8;
 
 /**
  * Picks the patterns worth sending.
@@ -54,8 +74,13 @@ export interface SelectionInput {
  * would be asked to edit a thread it can no longer see the definition of, and would
  * quietly rewrite it into something that no longer mates.
  */
-export function selectPatterns({ prompt, currentCode }: SelectionInput): ScadPattern[] {
+export function selectPatterns({ prompt, currentCode, remembered }: SelectionInput): ScadPattern[] {
   const haystack = prompt.toLowerCase();
+  // Anything the caller can't have meant is dropped rather than trusted: these ids arrive
+  // from a browser, and withDependencies throws on one it has never heard of.
+  const carried = new Set(
+    (remembered ?? []).filter((id) => getPattern(id) !== undefined).slice(0, MAX_REMEMBERED),
+  );
 
   const scored = PATTERNS.map((pattern) => {
     const matchers = MATCHERS.get(pattern.id) ?? [];
@@ -69,12 +94,23 @@ export function selectPatterns({ prompt, currentCode }: SelectionInput): ScadPat
       }
     }
 
+    // What the build is known to be made from outranks both. A pattern that was used is
+    // relevant to every turn that follows, whatever this turn's message happens to mention.
+    if (carried.has(pattern.id)) score += 20;
+
     return { pattern, score };
   }).filter((entry) => entry.score > 0);
 
   scored.sort((a, b) => b.score - a.score);
 
-  const chosen = scored.slice(0, MAX_SELECTED).map((entry) => entry.pattern.id);
+  // Sorted back into library order once the cut is made, so the same set of patterns always
+  // renders the same bytes. Score order would reshuffle the brief whenever a word in the
+  // request changed, and a cached prefix that changes is not a cached prefix.
+  const chosen = scored
+    .slice(0, MAX_SELECTED)
+    .map((entry) => entry.pattern.id)
+    .sort((a, b) => ORDER.get(a)! - ORDER.get(b)!);
+
   // Dependencies come along whether or not they matched, and don't count against the cap:
   // a loft without hull_chain renders an empty file rather than failing.
   return chosen.length ? withDependencies(chosen) : [];
