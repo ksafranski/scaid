@@ -1140,14 +1140,15 @@ const SELECTION = [
 ];
 
 /**
- * What the review pass is allowed to be told.
+ * What the agent is allowed to be told about the last build.
  *
- * The picture is the model's own render, so it can't carry a message. The rest of the
- * request can: this is the boundary where numbers from a browser become English in a
- * prompt, and the rule is that only the numbers cross. The sentences are written here.
+ * This is the boundary where numbers from a browser become English in a prompt, and the
+ * rule is that only the numbers cross. The sentences are written on the server, from the
+ * numbers, so there is no field a caller can fill to put words of its own in front of the
+ * model — which matters more now that a picture rides along with them.
  */
-const REVIEW = [
-  check("review › the measured block is bounded, not trusted", async () => {
+const GROUNDING = [
+  check("grounding › the measured block is bounded, not trusted", async () => {
     const good = toMeasured(await inspect("cube(20);"));
     if (!MeasuredSchema.safeParse(good).success) throw new Error("a real measurement was rejected");
 
@@ -1164,7 +1165,7 @@ const REVIEW = [
     }
   }),
 
-  check("review › the words it reads are written from the numbers", async () => {
+  check("grounding › the words it reads are written from the numbers", async () => {
     // Nothing in describeMeasurements comes from the caller, so there is no field a browser
     // can fill to put a sentence of its own in front of the model.
     const report = await inspect("cube(20);");
@@ -1174,7 +1175,7 @@ const REVIEW = [
   }),
 ];
 
-for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS, ...COLOURS, ...SELECTION, ...REVIEW]) {
+for (const item of [...CHECKS, ...DEFECTS, ...SECTIONS, ...PARAMETERS, ...ORIENTATION, ...EXPECTATIONS, ...SNAPPING, ...THREE_MF, ...VERSIONS, ...COLOURS, ...SELECTION, ...GROUNDING]) {
   if (!item) continue;
   const started = Date.now();
   try {

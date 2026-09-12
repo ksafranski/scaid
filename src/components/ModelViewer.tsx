@@ -137,15 +137,6 @@ const SNAPSHOT_MAX_EDGE = 1600;
 /** Room around the object in the picture, so it isn't jammed against the frame. */
 const SNAPSHOT_MARGIN = 1.15;
 
-/**
- * The angle the review pass looks from.
- *
- * Three-quarters and slightly above, which is the pose that shows the most of an unknown
- * object: a face, a side and the top all at once, with nothing squarely behind anything
- * else. Fixed rather than borrowed from the viewport, because a check that asks from a
- * different angle each time isn't answering the same question twice.
- */
-export const REVIEW_POSE = "55deg 72deg 300mm";
 
 /** The GLB is written at 1mm = 0.001 units — see `measure.ts`, which relies on the same. */
 const MM_PER_METER = 1000;
@@ -396,7 +387,7 @@ export function ModelViewer({
    * Filled in with a function that returns the view as a PNG data URL, for the spec
    * document. Null while there's nothing on screen worth picturing.
    */
-  snapshotRef?: React.MutableRefObject<((pose?: string) => Promise<string | null>) | null>;
+  snapshotRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
 }) {
   const viewerRef = useRef<ModelViewerElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -748,24 +739,14 @@ export function ModelViewer({
    *
    * Whatever they've spun the model to is the shot — a spec is written about the angle the
    * person chose to look at it from, not about a canonical pose they never saw.
-   *
-   * A caller may name an angle instead, which is what the review pass does: a check has to
-   * ask the same question of the same object every time, and "whatever it was left at" is
-   * not that. The angle is put back either way.
    */
   useEffect(() => {
     if (!snapshotRef) return;
 
-    snapshotRef.current = async (pose?: string) => {
+    snapshotRef.current = async () => {
       const viewer = viewerRef.current;
       if (!viewer) return null;
       if (!(await waitForModel(shownRef))) return null;
-
-      const held = viewer.getCameraOrbit();
-      if (pose) {
-        viewer.cameraOrbit = pose;
-        viewer.jumpCameraToGoal();
-      }
 
       // Frame the object before taking the picture, then put the view back.
       //
@@ -784,10 +765,6 @@ export function ModelViewer({
         return await flatten(viewer.toDataURL("image/png"));
       } finally {
         restore();
-        if (pose) {
-          viewer.cameraOrbit = `${held.theta}rad ${held.phi}rad ${held.radius}m`;
-          viewer.jumpCameraToGoal();
-        }
       }
     };
 

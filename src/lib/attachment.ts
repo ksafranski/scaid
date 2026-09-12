@@ -79,9 +79,10 @@ export interface PreparedImage {
    * What the picture is *for*, which changes how the agent should read it.
    *
    * A reference photo is the thing to build. A region capture is the model it already
-   * made, with part of it circled — building that would be nonsense.
+   * made, with part of it circled — building that would be nonsense. 'current' is the same
+   * model with no marks on it, sent automatically so the words have something to point at.
    */
-  kind: "reference" | "region";
+  kind: "reference" | "region" | "current";
 }
 
 export interface PreparedDocument {
@@ -241,6 +242,46 @@ function base64Of(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * How large the automatic screenshot is sent.
+ *
+ * Smaller than a photo, because it doesn't need to be big: it is one clean object on a
+ * plain background, and its whole job is to give "the handle" something to point at. It
+ * rides along with every follow-up, so its size is a tax on every turn rather than on the
+ * rare one where someone attaches something.
+ */
+const SNAPSHOT_EDGE = 1024;
+
+/**
+ * The model as it stands, ready to travel with a follow-up.
+ *
+ * Takes the studio's own snapshot rather than a file, and comes back marked 'current' so
+ * the agent reads it as its own work rather than as a brief. Returns null instead of an
+ * error: nobody asked for this picture, so failing to get one is not worth a word to
+ * anybody — the turn simply goes without it, exactly as it used to.
+ */
+export async function prepareSnapshot(dataUrl: string): Promise<PreparedImage | null> {
+  const image = await new Promise<HTMLImageElement | null>((resolve) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => resolve(null);
+    element.src = dataUrl;
+  });
+  if (!image?.naturalWidth) return null;
+
+  const encoded = encode(image, SNAPSHOT_EDGE, 0.85);
+  if (!encoded) return null;
+
+  return {
+    form: "image",
+    data: encoded.slice(encoded.indexOf(",") + 1),
+    mediaType: "image/jpeg",
+    previewUrl: encoded,
+    name: "On screen now",
+    kind: "current",
+  };
 }
 
 export async function prepareImage(file: File): Promise<PrepareResult> {

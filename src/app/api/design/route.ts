@@ -513,7 +513,15 @@ const RequestSchema = z.object({
         mediaType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
         data: z.string().max(MAX_ATTACHMENT_BASE64, "That picture is too large to send. Try a smaller one."),
         /** A photo of what to make, or the current model with a part circled on it. */
-        kind: z.enum(["reference", "region"]).default("reference"),
+        /**
+         * What the picture is for, which decides how it should be read.
+         *
+         * 'reference' is a thing to make. 'region' is the model with part of it circled.
+         * 'current' is the model as it stands, sent automatically alongside a follow-up so
+         * the words "the handle" have something to point at — nobody chose to attach it and
+         * it is never the thing to build.
+         */
+        kind: z.enum(["reference", "region", "current"]).default("reference"),
         name: z.string().max(200).optional(),
       }),
       z.object({
@@ -799,6 +807,19 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
   // A circled screenshot and a reference photo are opposite instructions — one is the thing
   // to make, the other is the thing already made. Left unsaid, a region capture reads as
   // "build me this picture of a lamp with a pink ring on it".
+  // Nobody attached this one — the studio sends it with every follow-up. Left unsaid it
+  // reads as a brief, and the next build comes back as a picture frame around a mug.
+  if (attachment?.form === "image" && attachment.kind === "current") {
+    text +=
+      "\n\nThe picture is your own last build, as it looks on their screen right now. They " +
+      "did not attach it and it is not a thing to make — it is there so that what they say " +
+      "has something to point at, and so you can see what you actually produced rather than " +
+      "what you meant to. Read their words as being about that object.\n\n" +
+      "It is one camera angle, so parts of the object are behind other parts. Never say " +
+      "something is missing or wrong because you cannot see it, and if what they are asking " +
+      "about is hidden from this angle, work from the code instead and say so.";
+  }
+
   if (attachment?.form === "image" && attachment.kind === "region") {
     text +=
       "\n\nThe picture is the model as it looks right now, marked up in pink. Loops enclose a " +

@@ -25,7 +25,7 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
-import { ModelViewer, REVIEW_POSE } from "./ModelViewer";
+import { ModelViewer } from "./ModelViewer";
 import { WorkingOverlay, WorkingText } from "./Working";
 import { TopBar } from "./TopBar";
 import { CodeEditor } from "./CodeEditor";
@@ -68,6 +68,7 @@ import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import {
   prepareAttachment,
+  prepareSnapshot,
   imageFromClipboard,
   ACCEPTED_ATTACHMENTS,
   type PreparedAttachment,
@@ -279,7 +280,7 @@ export function Studio({
   /** Collects whatever is drawn on the model, at the moment the message is sent. */
   const captureMarkupRef = useRef<(() => Promise<Markup | null>) | null>(null);
   /** Takes the viewer's picture, for the spec document. */
-  const snapshotRef = useRef<((pose?: string) => Promise<string | null>) | null>(null);
+  const snapshotRef = useRef<(() => Promise<string | null>) | null>(null);
   /**
    * The code the agent last handed us, so a render failure can be traced back to it.
    *
@@ -350,7 +351,6 @@ export function Studio({
     (next: Design) => {
       setDesign(next);
       setSaveState("idle");
-      setLooksWrong(null); // whatever it was about is no longer what's on screen
       setIncomplete(null); // whatever was half-typed has just been replaced
       if (next.code.trim()) {
         setVersions((prev) =>
@@ -577,6 +577,17 @@ export function Studio({
       else if (message.kind === "question") history.push({ role: "assistant", content: message.question });
     }
 
+    // The model as it stands, so a follow-up has something to point at.
+    //
+    // Only when nothing else was attached: a photo they chose and a region they circled are
+    // both deliberate, and a second picture beside either would muddle which one the message
+    // is about. Only when something is on screen, which is what makes this a follow-up. And
+    // never fatal — a picture that couldn't be taken just isn't sent.
+    const onScreen =
+      !file && design?.code.trim() && !section ? await snapshotRef.current?.() : null;
+    const shot = onScreen ? await prepareSnapshot(onScreen) : null;
+    const sending = file ?? shot;
+
     try {
       const built = await streamAgent({
         prompt: trimmed,
@@ -590,10 +601,10 @@ export function Studio({
         measured: metrics ? (toMeasured(metrics) ?? undefined) : undefined,
         plateSizeMm,
         history,
-        attachment: file
-          ? file.form === "image"
-            ? { form: "image", mediaType: file.mediaType, data: file.data, kind: file.kind, name: file.name }
-            : { form: "document", mediaType: file.mediaType, data: file.data, name: file.name }
+        attachment: sending
+          ? sending.form === "image"
+            ? { form: "image", mediaType: sending.mediaType, data: sending.data, kind: sending.kind, name: sending.name }
+            : { form: "document", mediaType: sending.mediaType, data: sending.data, name: sending.name }
           : undefined,
       });
       if (!built) return;
@@ -868,83 +879,7 @@ export function Studio({
     }
   }, [metrics, measuredCode, design?.expectations, design?.code, working, runRepair]);
 
-  /**
-   * Looking at the build, which is the check nothing else here does.
-   *
-   * Everything else reads numbers off the mesh, and numbers are silent about arrangement. A
-   * mug whose handle is a ring hovering beside the body is closed, has no open edges, and
-   * measures a perfectly sensible size; so does the same mug with the handle sunk into the
-   * wall so there is nothing to hold. Both pass, and both are obvious in the picture.
-   *
-   * It reports and stops there rather than fixing it. A wrong number is a wrong number and
-   * can be repaired on sight, but "the proportions defeat the purpose" is a judgement, and
-   * the person is looking at the object already — the whole shape of this app is that they
-   * look and decide. Handing them a second opinion is worth more than quietly acting on it.
-   */
-  const [looksWrong, setLooksWrong] = useState<string | null>(null);
-  const reviewedCodeRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    const code = design?.code;
-    if (!code || !metrics || metrics.empty || renderError || working) return;
-    // A cut model is not the object. Reviewing one would report the hole we made.
-    if (section) return;
-    // The measurements have to belong to this build, the same way the promises do.
-    if (measuredCode !== code) return;
-    // Only the agent's own untouched work. A hand-edit or a dial turn is the person's
-    // choice, and second-guessing it the moment they make it would be obnoxious.
-    if (repairRef.current?.code !== code) return;
-    if (reviewedCodeRef.current === code) return;
-    reviewedCodeRef.current = code;
-
-    let cancelled = false;
-    (async () => {
-      const image = await snapshotRef.current?.(REVIEW_POSE);
-      if (!image || cancelled) return;
-
-      const comma = image.indexOf(",");
-      const measured = toMeasured(metrics) ?? undefined;
-      try {
-        const response = await fetch("/api/review", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            code,
-            goal: design?.description || lastPrompt,
-            plateSizeMm,
-            measured,
-            image: { mediaType: "image/png", data: image.slice(comma + 1) },
-          }),
-        });
-        if (!response.ok || cancelled) return;
-
-        const { look } = (await response.json()) as {
-          look: { looksRight: boolean; problem: string; confidence: string } | null;
-        };
-        // An unsure verdict is the angle's fault as often as the model's, and a maybe is
-        // not worth interrupting someone with.
-        if (cancelled || !look || look.looksRight || look.confidence !== "sure") return;
-        if (look.problem.trim()) setLooksWrong(look.problem);
-      } catch {
-        // A review that didn't happen is a review that found nothing to say. It is the one
-        // check here that is purely additional, so it fails by going quiet.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    metrics,
-    measuredCode,
-    design?.code,
-    design?.description,
-    lastPrompt,
-    plateSizeMm,
-    renderError,
-    section,
-    working,
-  ]);
 
   /**
    * Speaks up when a measurement finds something certain and serious.
@@ -1550,29 +1485,9 @@ export function Studio({
             />
           )}
 
-          {/* Ahead of the size complaint, though it is the softer of the two.
-              A wrong size is very often the shadow of something visibly wrong: a part left
-              floating beside the model is still inside its bounding box, so the width comes
-              back wrong and the size card says so — truthfully, and about the symptom. This
-              one says which part came adrift, which is the sentence worth reading first and
-              the one worth handing to a repair. */}
-          {!renderError && looksWrong && !working && view === "chat" && (
-            <LookProblem
-              text={looksWrong}
-              onFix={() => {
-                const text = looksWrong;
-                setLooksWrong(null);
-                if (repairRef.current?.code === design?.code) runRepair(text);
-                else submitPrompt(text);
-              }}
-              onDismiss={() => setLooksWrong(null)}
-            />
-          )}
-
           {/* Only once the free attempt has been spent — before that it's already being
-              fixed, and a card offering what's underway would just be in the way. Waits
-              behind the review, and comes back if that gets dismissed. */}
-          {!renderError && !looksWrong && brokenPromise && !working && view === "chat" && (
+              fixed, and a card offering what's underway would just be in the way. */}
+          {!renderError && brokenPromise && !working && view === "chat" && (
             <PromiseProblem
               text={brokenPromise}
               onFix={() => {
@@ -1907,43 +1822,6 @@ function MessageBlock({
  * it may well be close enough for what they're doing. It says what was promised against
  * what arrived and offers the fix, rather than deciding for them that it matters.
  */
-/**
- * What the review saw.
- *
- * Deliberately worded as an opinion rather than a verdict — "have a look at this" instead
- * of "this is broken" — because it is one. It sits over the model so the sentence and the
- * thing it is about are in the same glance, and it offers both answers: the person can act
- * on it or dismiss it, and dismissing costs nothing.
- */
-function LookProblem({ text, onFix, onDismiss }: { text: string; onFix: () => void; onDismiss: () => void }) {
-  return (
-    <div className="absolute inset-x-5 top-5 rounded-xl border border-ink-600 bg-ink-850 p-5 shadow-2xl">
-      <div className="flex items-start gap-2.5">
-        <Eye size={20} weight="duotone" className="mt-0.5 shrink-0 text-volt-400" />
-        <div>
-          <p className="font-display font-bold">Worth a look</p>
-          <p className="mt-1 text-sm text-mist-300">{text}</p>
-        </div>
-      </div>
-
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={onFix}
-          className="rounded-lg bg-volt-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-volt-600"
-        >
-          Ask Scaid to fix it
-        </button>
-        <button
-          onClick={onDismiss}
-          className="rounded-lg px-4 py-2 text-sm font-semibold text-mist-500 transition hover:bg-ink-800 hover:text-mist-100"
-        >
-          Looks fine to me
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function PromiseProblem({ text, onFix }: { text: string; onFix: () => void }) {
   return (
     <div className="absolute inset-x-5 top-5 rounded-xl border border-amber-500/30 bg-ink-850 p-5 shadow-2xl">
