@@ -746,6 +746,10 @@ export function ModelViewer({
     if (!viewer) return;
     viewer.cameraOrbit = HOME_ORBIT;
     viewer.cameraTarget = HOME_TARGET;
+    // The scroll wheel runs out of orbit at min-camera-orbit and carries on by narrowing
+    // the lens instead, so someone who kept scrolling in is left holding a field of view
+    // that the orbit alone can't undo. Without this, Reset view doesn't.
+    viewer.fieldOfView = "auto";
     viewer.jumpCameraToGoal();
   }, []);
 
@@ -845,6 +849,15 @@ export function ModelViewer({
         tone-mapping="aces"
         exposure="1.05"
         interaction-prompt="none"
+        // A tap that misses the model is a tap that meant nothing. Left to itself,
+        // model-viewer reads one as "show me everything" — it throws the camera target away
+        // and zooms all the way out, so a stray click on the background costs you the view
+        // you had set up. Reset view is the deliberate way to ask for that.
+        //
+        // It also gives up tapping the model to pivot around that point, which is the same
+        // gesture and can't be kept on its own. No loss: there is one object here and the
+        // view is already framed on it.
+        disable-tap={true}
         style={{
           width: "100%",
           height: "100%",

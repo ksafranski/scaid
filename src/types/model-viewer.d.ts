@@ -62,6 +62,7 @@ export interface ModelViewerProps extends React.HTMLAttributes<HTMLElement> {
   "min-camera-orbit"?: string;
   "max-camera-orbit"?: string;
   "interaction-prompt"?: string;
+  "disable-tap"?: boolean;
   orientation?: string;
   exposure?: string;
   ref?: React.Ref<ModelViewerElement>;
