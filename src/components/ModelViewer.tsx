@@ -137,6 +137,16 @@ const SNAPSHOT_MAX_EDGE = 1600;
 /** Room around the object in the picture, so it isn't jammed against the frame. */
 const SNAPSHOT_MARGIN = 1.15;
 
+/**
+ * The angle the review pass looks from.
+ *
+ * Three-quarters and slightly above, which is the pose that shows the most of an unknown
+ * object: a face, a side and the top all at once, with nothing squarely behind anything
+ * else. Fixed rather than borrowed from the viewport, because a check that asks from a
+ * different angle each time isn't answering the same question twice.
+ */
+export const REVIEW_POSE = "55deg 72deg 300mm";
+
 /** The GLB is written at 1mm = 0.001 units — see `measure.ts`, which relies on the same. */
 const MM_PER_METER = 1000;
 
@@ -292,6 +302,22 @@ function frameOnModel(
   };
 }
 
+/**
+ * Waits for the GLB to finish decoding, up to a deadline.
+ *
+ * Returns false rather than throwing when it never arrives: a picture that couldn't be
+ * taken is a missing picture, not a failed build, and every caller here treats null that
+ * way. Ten seconds is far longer than a decode and far shorter than a person's patience.
+ */
+async function waitForModel(shown: React.RefObject<boolean>): Promise<boolean> {
+  const deadline = Date.now() + 10_000;
+  while (!shown.current) {
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return true;
+}
+
 /** Draws the viewer's transparent snapshot onto the studio's background. */
 async function flatten(snapshot: string): Promise<string | null> {
   const source = await new Promise<HTMLImageElement | null>((resolve) => {
@@ -370,7 +396,7 @@ export function ModelViewer({
    * Filled in with a function that returns the view as a PNG data URL, for the spec
    * document. Null while there's nothing on screen worth picturing.
    */
-  snapshotRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
+  snapshotRef?: React.MutableRefObject<((pose?: string) => Promise<string | null>) | null>;
 }) {
   const viewerRef = useRef<ModelViewerElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -471,6 +497,20 @@ export function ModelViewer({
   // Derived rather than stored, so switching src automatically falls back to "loading"
   // without an extra render pass.
   const modelShown = Boolean(src) && loadedSrc === src;
+
+  /**
+   * The same fact, readable from inside an async callback.
+   *
+   * A snapshot can be asked for before the viewer has finished decoding the GLB — the mesh
+   * is measured by the worker, which finishes first, so anything keyed on the measurements
+   * arrives early. State captured in a closure would still say "not yet" long after it was;
+   * this is the one thing that has to be read at the moment it's needed rather than the
+   * moment the callback was made.
+   */
+  const shownRef = useRef(modelShown);
+  useEffect(() => {
+    shownRef.current = modelShown;
+  }, [modelShown]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -708,13 +748,24 @@ export function ModelViewer({
    *
    * Whatever they've spun the model to is the shot — a spec is written about the angle the
    * person chose to look at it from, not about a canonical pose they never saw.
+   *
+   * A caller may name an angle instead, which is what the review pass does: a check has to
+   * ask the same question of the same object every time, and "whatever it was left at" is
+   * not that. The angle is put back either way.
    */
   useEffect(() => {
     if (!snapshotRef) return;
 
-    snapshotRef.current = async () => {
+    snapshotRef.current = async (pose?: string) => {
       const viewer = viewerRef.current;
-      if (!viewer || !modelShown) return null;
+      if (!viewer) return null;
+      if (!(await waitForModel(shownRef))) return null;
+
+      const held = viewer.getCameraOrbit();
+      if (pose) {
+        viewer.cameraOrbit = pose;
+        viewer.jumpCameraToGoal();
+      }
 
       // Frame the object before taking the picture, then put the view back.
       //
@@ -733,13 +784,17 @@ export function ModelViewer({
         return await flatten(viewer.toDataURL("image/png"));
       } finally {
         restore();
+        if (pose) {
+          viewer.cameraOrbit = `${held.theta}rad ${held.phi}rad ${held.radius}m`;
+          viewer.jumpCameraToGoal();
+        }
       }
     };
 
     return () => {
       snapshotRef.current = null;
     };
-  }, [snapshotRef, modelShown, modelBounds, modelRadiusMm]);
+  }, [snapshotRef, modelBounds, modelRadiusMm]);
 
   const resetView = useCallback(() => {
     const viewer = viewerRef.current;

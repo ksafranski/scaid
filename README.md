@@ -58,6 +58,7 @@ Fill in `.env.local`:
 | `SESSION_SECRET` | Signs the login cookie. Generate with `openssl rand -base64 32`. |
 | `ANTHROPIC_API_KEY` | Powers the design agent. Get one from the [Anthropic Console](https://console.anthropic.com/settings/keys). |
 | `ANTHROPIC_MODEL` | Optional. The design pass. Defaults to `claude-opus-5`. |
+| `ANTHROPIC_REVIEW_MODEL` | Optional. The review pass, which looks at the render and judges whether the parts ended up where they were meant to. Defaults to `claude-sonnet-5`. |
 | `ANTHROPIC_REPAIR_MODEL` | Optional. The repair pass, which fixes a named fault in code that already exists. Defaults to `claude-sonnet-5` — a narrower job than designing, with the compiler's own message to work from. |
 | `SIGNUP_CODE` | Optional. Beta signup gate; defaults to `scaidtester`. |
 

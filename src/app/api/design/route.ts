@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
+import { client, friendlyApiError, logUsage } from "@/lib/anthropic";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
@@ -10,15 +11,13 @@ import { findAdvice, findProblems } from "@/lib/scadLint";
 import { ActionField, IconField, reportIconDrift } from "@/lib/designSchema";
 import { PATTERN_INDEX, patternBrief } from "@/lib/scadPatterns/prompt";
 import { describeMeasurements } from "@/lib/geometry/facts";
+import { MeasuredSchema } from "@/lib/geometry/measuredSchema";
 import { MEASURABLES } from "@/lib/geometry/expectations";
 import { MAX_PLATE_MM, MIN_PLATE_MM } from "@/lib/types";
 
 // 300s is the platform maximum on Hobby and the default everywhere. Real requests land
 // at 30-50s; the headroom is for a complex model, not an expectation.
 export const maxDuration = 300;
-
-// One client for the lifetime of the server process, not one per request.
-const client = new Anthropic();
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
 
@@ -542,21 +541,7 @@ const RequestSchema = z.object({
    * written from them on this side. No string the browser controls reaches the prompt
    * through here, so a field can't be used to say something the person didn't say.
    */
-  measured: z
-    .object({
-      size: z.object({ x: z.number(), y: z.number(), z: z.number() }),
-      volume: z.number().nonnegative().finite(),
-      area: z.number().nonnegative().finite(),
-      centroid: z.object({ x: z.number(), y: z.number(), z: z.number() }).nullable(),
-      watertight: z.boolean(),
-      openEdges: z.number().int().nonnegative().max(10_000_000),
-      overhangArea: z.number().nonnegative().finite(),
-      overhangFraction: z.number().min(0).max(1),
-      steepestOverhangDeg: z.number().min(0).max(90),
-      contactArea: z.number().nonnegative().finite(),
-      tipMarginMm: z.number().finite().nullable(),
-    })
-    .optional(),
+  measured: MeasuredSchema.optional(),
   /** The plate it has to fit on. Known even before anything has been built. */
   plateSizeMm: z.number().int().min(MIN_PLATE_MM).max(MAX_PLATE_MM).optional(),
   /**
@@ -577,48 +562,6 @@ const RequestSchema = z.object({
 });
 
 /**
- * What each kind of token costs, relative to one uncached input token.
- *
- * Prices move and differ per model; these ratios have held. Keeping the log in
- * input-token-equivalents rather than dollars means it stays true when the price list
- * changes, and it still answers the only question that matters — which part of a turn the
- * money went to. Output is the number to watch: it is worth five of anything on the input
- * side, and the thinking budget is billed inside it.
- */
-const BILLED_AS = { cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2.0, output: 5 };
-
-/** Prints per-request token usage so spend (and whether caching is hitting) is observable. */
-function logUsage(label: string, usage: Anthropic.Usage | undefined) {
-  if (!usage) return;
-  const cacheRead = usage.cache_read_input_tokens ?? 0;
-  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
-  const write1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-  const write5m = usage.cache_creation?.ephemeral_5m_input_tokens ?? cacheWrite - write1h;
-  // Thinking is billed inside output_tokens and happens before a single character of the
-  // answer, so it's the number that explains a long wait. Without it a slow request and a
-  // stuck one look identical in the log.
-  const thinking = usage.output_tokens_details?.thinking_tokens ?? 0;
-
-  // One number for the turn, in input-token-equivalents, and the share of it that went on
-  // output. Without this the log says how many tokens moved and nothing about where the
-  // money went — and on a warm cache the answer is "almost all of it, into output".
-  const billed =
-    usage.input_tokens +
-    cacheRead * BILLED_AS.cacheRead +
-    write5m * BILLED_AS.cacheWrite5m +
-    write1h * BILLED_AS.cacheWrite1h +
-    usage.output_tokens * BILLED_AS.output;
-  const outputShare = Math.round(((usage.output_tokens * BILLED_AS.output) / billed) * 100);
-
-  console.log(
-    `[${label}] in=${usage.input_tokens} out=${usage.output_tokens} ` +
-      `(thinking=${thinking}) cache_read=${cacheRead} cache_write=${cacheWrite} ` +
-      `(${cacheRead > 0 ? "cache HIT" : cacheWrite > 0 ? "cache written" : "no cache"}) ` +
-      `billed=${Math.round(billed)}ite (${outputShare}% output)`,
-  );
-}
-
-/**
  * The last finished sentence of a reasoning summary, or null if there isn't one yet.
  *
  * Only complete sentences go out. Reasoning streams a few words at a time, and a line that
@@ -637,23 +580,6 @@ function stripFences(code: string): string {
   return code.replace(/^\s*```(?:openscad|scad)?\n?/i, "").replace(/```\s*$/, "");
 }
 
-function friendlyApiError(error: unknown): string {
-  if (error instanceof Anthropic.RateLimitError) {
-    return "Lots of people are making things right now. Wait a few seconds and try again!";
-  }
-  if (error instanceof Anthropic.AuthenticationError) {
-    return "The ANTHROPIC_API_KEY isn't being accepted. Check it and restart.";
-  }
-  if (error instanceof Anthropic.APIError) {
-    return "I couldn't reach my thinking brain just now. Please try again in a moment.";
-  }
-  // The answer arrived but didn't fit the shape it was asked for. Worth saying plainly:
-  // asking again usually works, where "something went wrong" suggests nothing at all.
-  if (error instanceof Error && /parse structured output/i.test(error.message)) {
-    return "My answer came back in a shape I couldn't read. Please ask me again!";
-  }
-  return "Something went wrong while I was building that. Please try again.";
-}
 
 /**
  * Runs the repair model over a program with a known fault.
