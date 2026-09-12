@@ -147,7 +147,15 @@ export async function POST(request: Request) {
           ],
         },
       ],
-      output_config: { format: zodOutputFormat(LookSchema) },
+      // Low, and measured that way. Over the same twenty-seven trials it scores the same
+      // 26/27 as the default effort while the average answer falls from about 700 output
+      // tokens to 81, and the worst from 4,637 to 466 — the difference between a review
+      // that costs a fifth of a build and one that occasionally costs more than the build.
+      //
+      // It gives up a little on the hardest case: a defect half-hidden by the camera went
+      // from 3/3 to 2/3. That case is why the pose is fixed rather than borrowed from the
+      // viewport, so it is a case this pass no longer meets.
+      output_config: { format: zodOutputFormat(LookSchema), effort: "low" },
     });
 
     logUsage("review", response.usage);

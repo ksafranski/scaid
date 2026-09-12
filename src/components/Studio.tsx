@@ -1550,9 +1550,13 @@ export function Studio({
             />
           )}
 
-          {/* Last of the three, and the softest. A model that didn't build or came out the
-              wrong size has a fact behind it; this has an opinion, so it waits its turn. */}
-          {!renderError && !brokenPromise && looksWrong && !working && view === "chat" && (
+          {/* Ahead of the size complaint, though it is the softer of the two.
+              A wrong size is very often the shadow of something visibly wrong: a part left
+              floating beside the model is still inside its bounding box, so the width comes
+              back wrong and the size card says so — truthfully, and about the symptom. This
+              one says which part came adrift, which is the sentence worth reading first and
+              the one worth handing to a repair. */}
+          {!renderError && looksWrong && !working && view === "chat" && (
             <LookProblem
               text={looksWrong}
               onFix={() => {
@@ -1566,8 +1570,9 @@ export function Studio({
           )}
 
           {/* Only once the free attempt has been spent — before that it's already being
-              fixed, and a card offering what's underway would just be in the way. */}
-          {!renderError && brokenPromise && !working && view === "chat" && (
+              fixed, and a card offering what's underway would just be in the way. Waits
+              behind the review, and comes back if that gets dismissed. */}
+          {!renderError && !looksWrong && brokenPromise && !working && view === "chat" && (
             <PromiseProblem
               text={brokenPromise}
               onFix={() => {
