@@ -555,19 +555,45 @@ const RequestSchema = z.object({
     .optional(),
 });
 
+/**
+ * What each kind of token costs, relative to one uncached input token.
+ *
+ * Prices move and differ per model; these ratios have held. Keeping the log in
+ * input-token-equivalents rather than dollars means it stays true when the price list
+ * changes, and it still answers the only question that matters — which part of a turn the
+ * money went to. Output is the number to watch: it is worth five of anything on the input
+ * side, and the thinking budget is billed inside it.
+ */
+const BILLED_AS = { cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2.0, output: 5 };
+
 /** Prints per-request token usage so spend (and whether caching is hitting) is observable. */
 function logUsage(label: string, usage: Anthropic.Usage | undefined) {
   if (!usage) return;
   const cacheRead = usage.cache_read_input_tokens ?? 0;
   const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const write1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+  const write5m = usage.cache_creation?.ephemeral_5m_input_tokens ?? cacheWrite - write1h;
   // Thinking is billed inside output_tokens and happens before a single character of the
   // answer, so it's the number that explains a long wait. Without it a slow request and a
   // stuck one look identical in the log.
   const thinking = usage.output_tokens_details?.thinking_tokens ?? 0;
+
+  // One number for the turn, in input-token-equivalents, and the share of it that went on
+  // output. Without this the log says how many tokens moved and nothing about where the
+  // money went — and on a warm cache the answer is "almost all of it, into output".
+  const billed =
+    usage.input_tokens +
+    cacheRead * BILLED_AS.cacheRead +
+    write5m * BILLED_AS.cacheWrite5m +
+    write1h * BILLED_AS.cacheWrite1h +
+    usage.output_tokens * BILLED_AS.output;
+  const outputShare = Math.round(((usage.output_tokens * BILLED_AS.output) / billed) * 100);
+
   console.log(
     `[${label}] in=${usage.input_tokens} out=${usage.output_tokens} ` +
       `(thinking=${thinking}) cache_read=${cacheRead} cache_write=${cacheWrite} ` +
-      `(${cacheRead > 0 ? "cache HIT" : cacheWrite > 0 ? "cache written" : "no cache"})`,
+      `(${cacheRead > 0 ? "cache HIT" : cacheWrite > 0 ? "cache written" : "no cache"}) ` +
+      `billed=${Math.round(billed)}ite (${outputShare}% output)`,
   );
 }
 
@@ -622,11 +648,25 @@ async function repairCode(args: {
   send?: Send;
   signal: AbortSignal;
 }) {
+  // Only the patterns the failing program actually uses — an empty prompt scores nothing,
+  // so this is driven entirely by what the code calls.
+  const { text: patterns, ids } = patternBrief({ prompt: "", currentCode: args.code });
+  if (ids.length) console.log(`[repair] patterns: ${ids.join(", ")}`);
+
   const stream = client.messages.stream({
     model: MODEL,
     max_tokens: 64000,
     thinking: { type: "adaptive" },
-    system: [{ type: "text", text: REPAIR_SYSTEM, cache_control: { type: "ephemeral" } }],
+    system: [
+      { type: "text", text: REPAIR_SYSTEM, cache_control: { type: "ephemeral", ttl: "1h" } },
+      // The verified source for anything the broken program was built out of.
+      //
+      // Selection keys off the code alone, and a pattern only scores when the program
+      // actually calls something it defines — so this is empty for most repairs and
+      // exactly the right reference for the rest. Without it a failed thread or gear gets
+      // repaired from memory, and comes back looking right and no longer fitting.
+      ...(patterns ? [{ type: "text" as const, text: patterns }] : []),
+    ],
     messages: [
       {
         role: "user",
@@ -863,13 +903,26 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
     // before the plan, so it's what the studio shows while it waits.
     thinking: { type: "adaptive", display: "summarized" },
     // The system prompt is byte-identical on every request from every user, so caching it
-    // means we pay full price for it roughly once per five minutes instead of every time.
-    // Placed explicitly rather than via top-level cache_control, which would land the
-    // breakpoint on the (always different) user turn and never hit.
+    // means we pay full price for it once in a while instead of every time. Placed
+    // explicitly rather than via top-level cache_control, which would land the breakpoint
+    // on the (always different) user turn and never hit.
+    //
+    // An hour rather than the default five minutes. The write costs 2x instead of 1.25x,
+    // which is worth it as soon as a second request arrives inside the window — and five
+    // minutes is shorter than someone spends looking at a model and deciding what to
+    // change, so the default was paying to re-cache the same bytes all day.
     system: [
-      { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
+      { type: "text", text: SYSTEM, cache_control: { type: "ephemeral", ttl: "1h" } },
       // Chosen from this turn's request, so it must sit after the breakpoint above or the
       // cached prefix would change on every call and never hit.
+      //
+      // Not given a cache breakpoint of its own, though it looks like it should have one:
+      // measured at 3,701 tokens on a five-pattern build, re-sent every turn. The selection
+      // isn't stable enough to cache. It keys partly off modules the program calls, and the
+      // agent is told to paste pattern code in and rename it to suit the object — so the
+      // same build came back with five patterns on the first turn and one on the second.
+      // A breakpoint on bytes that change costs 1.25x for nothing. Worth revisiting if the
+      // build ever remembers which patterns it was made from.
       ...(patterns.text ? [{ type: "text" as const, text: patterns.text }] : []),
     ],
     messages,
