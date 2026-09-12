@@ -68,6 +68,7 @@ import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import {
   prepareAttachment,
+  imageFromClipboard,
   ACCEPTED_ATTACHMENTS,
   type PreparedAttachment,
 } from "@/lib/attachment";
@@ -1276,6 +1277,15 @@ export function Studio({
               event.preventDefault();
               submitPrompt(prompt);
             }}
+            // On the form rather than the box, so a screenshot lands whether they were
+            // typing or had just tabbed to the paperclip. Only an image is taken — every
+            // other paste falls through to the browser untouched.
+            onPaste={(event) => {
+              const image = imageFromClipboard(event.clipboardData);
+              if (!image) return;
+              event.preventDefault();
+              attachFile(image);
+            }}
             // Docked to the bottom once there's a conversation. Before that it sits in the
             // middle of the opening group, so the rule moves underneath it to divide the
             // composer from the suggestions rather than marking the bottom of the panel.
@@ -1357,7 +1367,7 @@ export function Studio({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                title="Attach a picture, a PDF or something written"
+                title="Attach a picture, a PDF or something written — or paste a picture straight in"
                 aria-label="Attach a picture, a PDF or something written"
                 className="flex shrink-0 items-center justify-center rounded-xl border border-ink-700 px-4 py-3 text-mist-300 transition hover:border-ink-600 hover:bg-ink-800 hover:text-mist-100"
               >

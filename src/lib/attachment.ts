@@ -144,6 +144,37 @@ function isText(file: File): boolean {
   return /\.(md|markdown|txt|csv|json|log)$/i.test(file.name);
 }
 
+/**
+ * What the browser calls an image it put on the clipboard itself.
+ *
+ * A screenshot has no filename, so Chrome and Safari both invent this one. Copying an
+ * actual file in Finder keeps its real name, which is worth showing — so only the invented
+ * name gets replaced.
+ */
+const PLACEHOLDER_NAME = /^image\.(png|jpe?g|webp|gif)$/i;
+
+/**
+ * The image on the clipboard, if taking it is what someone meant by pasting.
+ *
+ * Text wins when there is any, because a clipboard can hold both — copying a cell out of a
+ * spreadsheet offers a picture of it as well as the words — and in that case the words are
+ * what was asked for. A screenshot carries no text, which is the case this exists for.
+ */
+export function imageFromClipboard(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  if (data.getData("text/plain").trim()) return null;
+
+  for (const file of Array.from(data.files)) {
+    if (!(ACCEPTED_IMAGE_TYPES as readonly string[]).includes(file.type)) continue;
+    if (!file.name || PLACEHOLDER_NAME.test(file.name)) {
+      const extension = file.type.replace("image/", "").replace("jpeg", "jpg");
+      return new File([file], `Pasted picture.${extension}`, { type: file.type });
+    }
+    return file;
+  }
+  return null;
+}
+
 /** Reads what someone attached into the shape the agent can be handed. */
 export async function prepareAttachment(file: File): Promise<PrepareResult> {
   if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
