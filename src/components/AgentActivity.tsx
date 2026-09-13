@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle, Stop, Wrench } from "@phosphor-icons/react";
+import { CheckCircle, Circle, Stop, Wrench } from "@phosphor-icons/react";
 import { StepIcon } from "./StepIcon";
 import { WorkingText } from "./Working";
 import type { AgentStage } from "@/lib/agentEvents";
@@ -55,13 +55,32 @@ function useElapsedSeconds(counting: boolean): number {
 }
 
 /**
+ * The width of every glyph in the panel, and so the column everything hangs off.
+ *
+ * One number because three things depend on each other: the step icons, the rule beside the
+ * plan, and the dot that says work is still going on. Change it and they move together.
+ */
+const ICON = 17;
+
+/**
+ * The dot that says something is still happening.
+ *
+ * A filled Circle at the step icons' own size rather than a small styled span, so it sits in
+ * the same slot they do and its centre lands on the rule running down beside the plan. A
+ * bare 8px dot centred itself at 4px and pulled the whole column four and a half pixels out
+ * of line — the one element in the panel that wasn't on the grid.
+ */
+function Live() {
+  return <Circle size={ICON} weight="fill" className="shrink-0 animate-pulse text-volt-400" />;
+}
+
+/**
  * The indented rule down the side of the plan and the reasoning.
  *
- * 7.5px in, which is not a round number for a reason: the part icons below are 17px squares
- * sitting flush against the same left edge, so their centres fall at 8.5px, and a 2px rule
- * straddles that when it starts half a pixel short of it. The rule then runs down the middle
- * of the icon column instead of a hair to its left, which is the sort of miss you can see
- * without being able to name.
+ * ICON / 2 - 1: the glyphs sit flush against the same left edge, so their centres fall at
+ * half their width, and a 2px rule straddles that when it starts a pixel short of it. Spelled
+ * out rather than computed because Tailwind reads this file as text — a class assembled at
+ * runtime is a class it never generates, and the rule would simply not be there.
  */
 const QUOTED = "ml-[7.5px] border-l-2 border-ink-700 pl-3 text-sm leading-relaxed";
 
@@ -118,13 +137,13 @@ export function AgentActivity({
 
   return (
     <div className="animate-rise space-y-3 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3.5">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         {planned ? (
-          <CheckCircle size={16} weight="duotone" className="shrink-0 text-emerald-400" />
+          <CheckCircle size={ICON} weight="duotone" className="shrink-0 text-emerald-400" />
         ) : fixing ? (
-          <Wrench size={16} weight="duotone" className="shrink-0 animate-pulse text-amber-400" />
+          <Wrench size={ICON} weight="duotone" className="shrink-0 animate-pulse text-amber-400" />
         ) : (
-          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
+          <Live />
         )}
         {planned ? (
           <span className="flex-1 text-sm font-medium text-mist-300">Planned the build</span>
@@ -169,11 +188,11 @@ export function AgentActivity({
 
       {/* Last, because it is the only line still moving. Everything above it has happened. */}
       {planned && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           {fixing ? (
-            <Wrench size={16} weight="duotone" className="shrink-0 animate-pulse text-amber-400" />
+            <Wrench size={ICON} weight="duotone" className="shrink-0 animate-pulse text-amber-400" />
           ) : (
-            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
+            <Live />
           )}
           <WorkingText className="flex-1 text-sm font-medium">{action}</WorkingText>
         </div>
