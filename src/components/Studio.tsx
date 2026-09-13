@@ -460,7 +460,19 @@ export function Studio({
    * it's named, the code as it's written — so the panel above the composer shows the build
    * happening rather than a spinner and a guess.
    */
-  async function streamAgent(payload: Record<string, unknown>): Promise<AgentDesign | null> {
+  /**
+   * @param quiet Keep whatever the checks said out of the conversation.
+   *
+   * For a fix that happens after the build is already on screen. The person asked for a
+   * model, watched it arrive, and read what it was — a paragraph afterwards explaining a
+   * repair they never saw fail is an answer to a question nobody asked, and it arrives
+   * below the checkpoint it interrupts. The fix still happens and the activity panel still
+   * shows it happening; it just doesn't leave a note behind.
+   */
+  async function streamAgent(
+    payload: Record<string, unknown>,
+    { quiet = false }: { quiet?: boolean } = {},
+  ): Promise<AgentDesign | null> {
     setActivity(IDLE_ACTIVITY);
 
     // Aborting here closes the response, which the route hears as a disconnect and uses to
@@ -532,7 +544,7 @@ export function Studio({
 
     // The activity panel disappears when the build lands, so anything the checks found has
     // to move into the conversation to survive.
-    if (design && notes.length) {
+    if (design && notes.length && !quiet) {
       setMessages((prev) => [...prev, ...notes.map((text) => ({ kind: "note" as const, text }))]);
     }
 
@@ -660,7 +672,7 @@ export function Studio({
           // against the build that actually failed — and so this doesn't have to re-run
           // every time the design changes.
           patternIds: target.patternIds,
-        });
+        }, { quiet: true });
         if (!fixed) return;
 
         // A repair changes the code, not what the thing is — so the name, description and
@@ -668,8 +680,6 @@ export function Studio({
         setDesign((prev) => (prev ? { ...prev, code: fixed.code } : prev));
         setSaveState("idle");
         setIncomplete(null);
-        // What was wrong arrived as a note event while the fix was being written, so it's
-        // already in the conversation — adding `summary` here would say it twice.
         repairRef.current = { ...target, code: fixed.code, attempts: target.attempts + 1 };
         render(fixed.code);
       } catch (error) {
@@ -896,6 +906,21 @@ export function Studio({
     reportedProblemRef.current = problem;
     if (problem) setMessages((prev) => [...prev, { kind: "note", text: problem }]);
   }, [metrics]);
+
+  /**
+   * The last message anyone can still answer.
+   *
+   * Not simply the last message. A note is an annotation on the turn above it, not a turn of
+   * its own — something a check noticed, arriving whenever the check finished. One landing
+   * after a checkpoint used to retire it, so a build that happened to notice something came
+   * with its three next moves already greyed out, and the way forward was to type instead.
+   */
+  const lastTurn = (() => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].kind !== "note") return index;
+    }
+    return -1;
+  })();
 
   /** Marks the checkpoint on one turn as settled, so its choices stop asking to be made. */
   function markDone(index: number) {
@@ -1298,7 +1323,7 @@ export function Studio({
                 <MessageBlock
                   key={index}
                   message={message}
-                  active={index === messages.length - 1 && !working}
+                  active={index === lastTurn && !working}
                   onPick={(text) => {
                     // Picking a listed answer un-picks Other, so the card can't end up
                     // claiming they wrote their own answer when they didn't.
