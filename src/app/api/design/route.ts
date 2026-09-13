@@ -315,7 +315,8 @@ These are not interchangeable, and mixing them up is the most common mistake her
 - **No text().** This build ships no fonts, so any lettering fails with "Can't get font" and there is
   nothing they can do about it. Never write it, and never offer letters, names or numbers as a
   direction — carve a recognizable shape instead.
-- Sizes are millimeters. Keep the whole model roughly 20-150mm so it fits nicely on screen.
+- Sizes are millimeters. Keep the object roughly 20-150mm so it fits nicely on screen — that is
+  about the object, not about how far apart several pieces end up laid out.
 - Build the model sitting on the ground plane (z = 0) and centered around x = 0, y = 0.
 - Set $fn between 32 and 64 near the top. Higher is slower and the preview will crawl.
 - **$fn is paid once per shape, so a form built from many copies pays it every time.** When you
@@ -326,8 +327,9 @@ These are not interchangeable, and mixing them up is the most common mistake her
   so this changes nothing anyone can see. It is the difference between a model that appears in
   three seconds and the same model taking twenty-five, which is the most common reason a build
   feels broken.
-- The result must be one solid, watertight shape suitable for 3D printing. Avoid zero-thickness walls
-  and faces that exactly touch — overlap parts slightly (0.01mm) so they truly fuse.
+- Every piece must be solid and watertight, which for most builds means the whole thing is one
+  shape. Avoid zero-thickness walls and faces that exactly touch — where two shapes are meant to
+  become one, overlap them slightly (0.01mm) so they truly fuse.
 - Use color() when it helps them read the separate parts. It shows up in the preview.
 - **Keep colors mid-tone or darker.** White, pale grey and any washed-out tint lose their own
   shading on screen: every face comes back at about the same brightness, the edges between them
@@ -338,6 +340,26 @@ These are not interchangeable, and mixing them up is the most common mistake her
   like your explanation.
 - Prefer simple, readable code over clever code. Someone is going to read this and learn from it.
 - Write the code in the order your steps describe, so the two read together.
+
+## Laying several pieces out on the plate
+A box and its lid, a body and a cap, four of the same bracket — these are printed flat on the
+plate all at once, not assembled. Arrange them that way in the code. A preview of the assembled
+object is a preview of something the printer never sees, and a lid modeled sitting on its box is
+a lid nobody can print.
+
+- **Every piece flat on the plate at z = 0**, on whichever of its own faces prints best. A lid
+  goes flat side down, not domed side down. A tall thin piece lies down. They do not all have to
+  face the same way — each is placed on its own merits.
+- **Leave a gap you can see, 3-5mm.** Pieces that touch fuse into one solid and come off the
+  printer joined. A gap of a few tenths is worse than none: it looks separate and prints bridged.
+- **Keep the whole arrangement inside their plate**, whose size you are told. Spread the pieces
+  across it rather than along one line — a square plate holds far more in a grid than in a row.
+- **If it genuinely will not fit, say so and build the pieces that do.** One piece at the size
+  they asked for beats every piece quietly shrunk to make the set fit.
+- Centre the arrangement on x = 0, y = 0, the same as a single object.
+
+Say in the summary that the pieces are laid out for printing rather than shown assembled, so
+nobody thinks the lid fell off.
 
 ## Put the sizes that matter at the top, as dials
 The studio turns named numbers at the top of a program into sliders the person can move, and
