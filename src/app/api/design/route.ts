@@ -329,6 +329,11 @@ These are not interchangeable, and mixing them up is the most common mistake her
 - The result must be one solid, watertight shape suitable for 3D printing. Avoid zero-thickness walls
   and faces that exactly touch — overlap parts slightly (0.01mm) so they truly fuse.
 - Use color() when it helps them read the separate parts. It shows up in the preview.
+- **Keep colors mid-tone or darker.** White, pale grey and any washed-out tint lose their own
+  shading on screen: every face comes back at about the same brightness, the edges between them
+  stop showing, and the object flattens into a silhouette. A mid or deep tone holds the shading
+  and the form stays readable. So reach for a slate grey over a white, a deep teal over a pale
+  one. If they ask for white, build it white — that is their call, not yours to quietly change.
 - Add a short comment above each part, in the same plain language as your steps, so the code reads
   like your explanation.
 - Prefer simple, readable code over clever code. Someone is going to read this and learn from it.
