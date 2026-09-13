@@ -54,6 +54,17 @@ function useElapsedSeconds(counting: boolean): number {
   return seconds;
 }
 
+/**
+ * The indented rule down the side of the plan and the reasoning.
+ *
+ * 7.5px in, which is not a round number for a reason: the part icons below are 17px squares
+ * sitting flush against the same left edge, so their centres fall at 8.5px, and a 2px rule
+ * straddles that when it starts half a pixel short of it. The rule then runs down the middle
+ * of the icon column instead of a hair to its left, which is the sort of miss you can see
+ * without being able to name.
+ */
+const QUOTED = "ml-[7.5px] border-l-2 border-ink-700 pl-3 text-sm leading-relaxed";
+
 /** What is happening right now, in the model's own order of work. */
 function currentAction(activity: Activity, seconds: number): string {
   switch (activity.stage) {
@@ -133,16 +144,10 @@ export function AgentActivity({
       {activity.stage === "thinking" && activity.thought && (
         // Replaced as the reasoning moves on, and gone the moment the plan arrives — this is
         // what fills the wait, not a record worth keeping.
-        <p className="border-l-2 border-ink-700 pl-3 text-sm leading-relaxed text-mist-500">
-          {activity.thought}
-        </p>
+        <p className={`${QUOTED} text-mist-500`}>{activity.thought}</p>
       )}
 
-      {activity.plan && (
-        <p className="border-l-2 border-ink-700 pl-3 text-sm leading-relaxed text-mist-400">
-          {activity.plan}
-        </p>
-      )}
+      {activity.plan && <p className={`${QUOTED} text-mist-400`}>{activity.plan}</p>}
 
       {activity.parts.length > 0 && (
         <ul className="space-y-1.5">
