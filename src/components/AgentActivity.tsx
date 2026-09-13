@@ -54,8 +54,8 @@ function useElapsedSeconds(counting: boolean): number {
   return seconds;
 }
 
-/** The headline for each phase. */
-function headline(activity: Activity, seconds: number): string {
+/** What is happening right now, in the model's own order of work. */
+function currentAction(activity: Activity, seconds: number): string {
   switch (activity.stage) {
     case "parts":
       return activity.parts.length ? "Working out the parts" : "Planning the build";
@@ -89,17 +89,37 @@ export function AgentActivity({
 }) {
   const fixing = activity.stage === "fixing";
   const seconds = useElapsedSeconds(activity.stage === "thinking");
-  const title = headline(activity, seconds);
+  const action = currentAction(activity, seconds);
+
+  /**
+   * Whether the planning is behind us.
+   *
+   * Once it is, the panel reads as a list of work in the order it happened: what was worked
+   * out, the parts it was broken into, and then — at the bottom, where the eye already is —
+   * what is happening now. The heading stops being the live line and becomes the first
+   * finished thing, so the newest line is always the last one rather than the top one.
+   *
+   * A repair asked for after the build has no plan behind it and never had one, so it keeps
+   * the live line in the heading where it would otherwise sit under a claim to have planned
+   * something.
+   */
+  const planned = Boolean(activity.plan) && activity.stage !== "thinking" && activity.stage !== "parts";
 
   return (
     <div className="animate-rise space-y-3 rounded-xl border border-ink-700 bg-ink-800 px-4 py-3.5">
       <div className="flex items-center gap-3">
-        {fixing ? (
+        {planned ? (
+          <CheckCircle size={16} weight="duotone" className="shrink-0 text-emerald-400" />
+        ) : fixing ? (
           <Wrench size={16} weight="duotone" className="shrink-0 animate-pulse text-amber-400" />
         ) : (
           <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
         )}
-        <WorkingText className="flex-1 text-sm font-medium">{title}</WorkingText>
+        {planned ? (
+          <span className="flex-1 text-sm font-medium text-mist-300">Planned the build</span>
+        ) : (
+          <WorkingText className="flex-1 text-sm font-medium">{action}</WorkingText>
+        )}
 
         <button
           onClick={onStop}
@@ -141,6 +161,18 @@ export function AgentActivity({
           {note}
         </p>
       ))}
+
+      {/* Last, because it is the only line still moving. Everything above it has happened. */}
+      {planned && (
+        <div className="flex items-center gap-3">
+          {fixing ? (
+            <Wrench size={16} weight="duotone" className="shrink-0 animate-pulse text-amber-400" />
+          ) : (
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-volt-400" />
+          )}
+          <WorkingText className="flex-1 text-sm font-medium">{action}</WorkingText>
+        </div>
+      )}
     </div>
   );
 }
