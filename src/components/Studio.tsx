@@ -14,7 +14,6 @@ import {
   FileText,
   Notebook,
   Paperclip,
-  Ruler,
   Sliders,
   PencilSimple,
   Plus,
@@ -57,13 +56,6 @@ import {
   record as recordVersion,
   type Version,
 } from "@/lib/versions";
-import {
-  checkExpectations,
-  describeMisses,
-  misses,
-  summariseMisses,
-  type Expectation,
-} from "@/lib/geometry/expectations";
 import { SpecDocumentModal } from "./SpecDocumentModal";
 import { buildSpec, type SpecDocument } from "@/lib/specDocument";
 import {
@@ -89,11 +81,6 @@ interface Design {
   code: string;
   /** What they asked for, ticked off. Only for a request that carried several things. */
   requirements?: AgentRequirement[];
-  /**
-   * Sizes this build committed to. Belongs to the turn, not the object — never saved, and
-   * dropped the moment the code is touched, because by then nobody promised anything.
-   */
-  expectations?: Expectation[];
   /** Where to pause and decide what happens next. Absent on anything saved before this. */
   checkpoint?: AgentCheckpoint;
   /**
@@ -718,11 +705,6 @@ export function Studio({
   const editTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function editCode(next: string, immediate = false) {
-    // Whatever the agent committed to was about its own build. The moment this changes —
-    // by hand, by a dial, by turning it over — there is no promise left to hold it to, so
-    // the claims go with the change rather than being re-checked against someone else's work.
-    setBrokenPromise(null);
-
     // Writing into an empty editor starts a build from nothing, so there's a design to hold
     // it. The agent overwrites all of this the moment it's asked to change anything.
     setDesign((prev) =>
@@ -797,10 +779,9 @@ export function Studio({
    */
   function restoreVersion(version: Version) {
     if (!design) return;
-    setDesign({ ...design, code: version.code, expectations: undefined });
+    setDesign({ ...design, code: version.code });
     setSaveState("idle");
     setIncomplete(null);
-    setBrokenPromise(null);
     setVersions((prev) =>
       recordVersion(prev, { code: version.code, label: "Put back an earlier version", at: Date.now() }),
     );
@@ -849,45 +830,7 @@ export function Studio({
     setVersions((prev) => recordMeasurements(prev, measuredCode, toMeasured(metrics)));
   }, [metrics, measuredCode]);
 
-  /**
-   * Holds the build to the sizes it said it would be.
-   *
-   * The agent names them before writing the code; this is where they meet the mesh. A miss
-   * is the same kind of fault as code that doesn't compile — the agent wrote it and got it
-   * wrong — so it goes down the same path, including the one free attempt at fixing it.
-   *
-   * Keyed on the code it was checked against, so a fix that lands is checked once and a
-   * dozen re-renders of the same program aren't.
-   */
-  const [brokenPromise, setBrokenPromise] = useState<string | null>(null);
-  const checkedCodeRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    const promised = design?.expectations;
-    const code = design?.code;
-    if (!metrics || metrics.empty || !promised?.length || !code) return;
-    // The measurements have to be of this build. A design lands before its model does, so
-    // without this a new one is judged on the last one's size and fails for it.
-    if (measuredCode !== code) return;
-    if (checkedCodeRef.current === code) return;
-    checkedCodeRef.current = code;
-
-    const results = checkExpectations(promised, metrics);
-    const missed = misses(results);
-    if (!missed.length) {
-      setBrokenPromise(null);
-      return;
-    }
-
-    setBrokenPromise(summariseMisses(results));
-
-    // Its own code, untouched, and it hasn't already had its go. Same budget as a build
-    // error, deliberately shared: two ways of being wrong shouldn't buy two free retries.
-    const target = repairRef.current;
-    if (target && target.code === code && target.attempts < AUTO_REPAIR_LIMIT && !working) {
-      runRepair(describeMisses(results));
-    }
-  }, [metrics, measuredCode, design?.expectations, design?.code, working, runRepair]);
 
 
 
@@ -993,8 +936,6 @@ export function Studio({
 
     reset(); // the viewport must clear too, not just the conversation
     reportedProblemRef.current = null; // a fresh build gets to raise the same problem again
-    setBrokenPromise(null);
-    checkedCodeRef.current = null;
     setVersions([]);
     setMessages([]);
     setDesign(null);
@@ -1510,21 +1451,6 @@ export function Studio({
             />
           )}
 
-          {/* Only once the free attempt has been spent — before that it's already being
-              fixed, and a card offering what's underway would just be in the way. */}
-          {!renderError && brokenPromise && !working && view === "chat" && (
-            <PromiseProblem
-              text={brokenPromise}
-              onFix={() => {
-                const promised = design?.expectations;
-                if (!promised?.length || !metrics) return;
-                setBrokenPromise(null);
-                const fault = describeMisses(checkExpectations(promised, metrics));
-                if (repairRef.current?.code === design?.code) runRepair(fault);
-                else submitPrompt("The sizes came out wrong. Please fix them.");
-              }}
-            />
-          )}
         </section>
       </main>
 
@@ -1847,27 +1773,6 @@ function MessageBlock({
  * it may well be close enough for what they're doing. It says what was promised against
  * what arrived and offers the fix, rather than deciding for them that it matters.
  */
-function PromiseProblem({ text, onFix }: { text: string; onFix: () => void }) {
-  return (
-    <div className="absolute inset-x-5 top-5 rounded-xl border border-amber-500/30 bg-ink-850 p-5 shadow-2xl">
-      <div className="flex items-start gap-2.5">
-        <Ruler size={20} weight="duotone" className="mt-0.5 shrink-0 text-amber-400" />
-        <div>
-          <p className="font-display font-bold">Not quite the size I said</p>
-          <p className="mt-1 text-sm text-mist-300">{text}</p>
-        </div>
-      </div>
-
-      <button
-        onClick={onFix}
-        className="mt-4 rounded-lg bg-volt-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-volt-600"
-      >
-        Ask Scaid to fix the sizes
-      </button>
-    </div>
-  );
-}
-
 function RenderProblem({
   error,
   onFix,

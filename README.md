@@ -58,6 +58,7 @@ Fill in `.env.local`:
 | `SESSION_SECRET` | Signs the login cookie. Generate with `openssl rand -base64 32`. |
 | `ANTHROPIC_API_KEY` | Powers the design agent. Get one from the [Anthropic Console](https://console.anthropic.com/settings/keys). |
 | `ANTHROPIC_MODEL` | Optional. The design pass. Defaults to `claude-opus-5`. |
+| `ANTHROPIC_DESIGN_EFFORT` | Optional. How long the design pass thinks before it writes: `low` (default), `medium` or `high`. The biggest cost and latency knob here — turn it up if a complicated build comes back worse. |
 | `ANTHROPIC_REPAIR_MODEL` | Optional. The repair pass, which fixes a named fault in code that already exists. Defaults to `claude-sonnet-5` — a narrower job than designing, with the compiler's own message to work from. |
 | `SIGNUP_CODE` | Optional. Beta signup gate; defaults to `scaidtester`. |
 
@@ -236,27 +237,6 @@ rather than a larger version of this one.
 
 The readout says when a reading was moved, because a point that lands somewhere other than where
 it was clicked has to account for itself.
-
-### Held to what it said
-
-Measurements tell the agent what it built. They don't make it right: it can say a lid is 40mm
-across, build one 43mm across, describe it as 40mm, and nothing anywhere disagrees — until it
-doesn't fit.
-
-So a build names the handful of sizes it is committing to *before* writing the code, and
-`src/lib/geometry/expectations.ts` checks them against the mesh that came out. A miss is treated
-as the same kind of fault as code that doesn't compile — the agent wrote it and got it wrong — so
-it goes down the same path, sharing the same one free attempt at fixing it before the manual
-button takes over.
-
-Only what is really measured may be claimed. Wall thickness and hole diameter are the two most
-worth checking and neither is on the list, because neither can be measured yet: a check that
-cannot fail reads as verification and isn't. A tolerance wide enough that nothing could fail it is
-reported as unchecked for the same reason.
-
-It earns its place immediately. Asked for a plate 85 × 56 × 3mm, the first attempt came out
-52 × 52 × 46 and was corrected without being asked. Asked for a 30mm ring, the first attempt came
-out far wider and was corrected too. Both would have shipped silently wrong.
 
 ### Measuring what came out
 

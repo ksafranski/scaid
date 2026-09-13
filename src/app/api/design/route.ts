@@ -12,7 +12,6 @@ import { ActionField, IconField, reportIconDrift } from "@/lib/designSchema";
 import { PATTERN_INDEX, patternBrief } from "@/lib/scadPatterns/prompt";
 import { describeMeasurements } from "@/lib/geometry/facts";
 import { MeasuredSchema } from "@/lib/geometry/measuredSchema";
-import { MEASURABLES } from "@/lib/geometry/expectations";
 import { MAX_PLATE_MM, MIN_PLATE_MM } from "@/lib/types";
 
 // 300s is the platform maximum on Hobby and the default everywhere. Real requests land
@@ -34,6 +33,21 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
  * worse than the failure it was fixing.
  */
 const REPAIR_MODEL = process.env.ANTHROPIC_REPAIR_MODEL || "claude-sonnet-5";
+
+/**
+ * How long the design pass deliberates before it writes.
+ *
+ * Thinking is billed as output and output is most of the bill, so this is the largest single
+ * cost and latency knob in the app — and the least verifiable, because the only test of a
+ * build is whether the object is right.
+ *
+ * Low, measured against medium on the same two prompts: a first build 49s to 30s, and a
+ * small change 146s to 117s with a quarter off the tokens, both coming out correct. The
+ * evidence is two builds, which is why it is a setting rather than a constant: a threaded
+ * box or a gear train may want more room to think than a box with rounded edges, and this
+ * is the dial to turn if one comes back worse.
+ */
+const EFFORT = (process.env.ANTHROPIC_DESIGN_EFFORT || "low") as "low" | "medium" | "high";
 
 /** A one-tap reply: what the button says, and what gets sent when it's pressed. */
 const ChoiceSchema = z.object({
@@ -163,32 +177,6 @@ const DesignSchema = z.object({
         ),
     })
     .describe("Where the build pauses so they can look at it and choose what happens next."),
-  expectations: z
-    .array(
-      z.object({
-        what: z
-          .string()
-          .describe("What this is, in their words: 'the outside across the top'. No jargon."),
-        measure: z
-          .enum(MEASURABLES)
-          .describe("Which measurement this is a claim about."),
-        value: z.number().describe("What it should come out as. Millimeters, or mm³ for volume."),
-        tolerance: z
-          .number()
-          .positive()
-          .describe(
-            "How far out it may be and still be right, in the same unit. A real number: " +
-              "0.5mm on a dimension someone will measure, not one so large nothing could fail it.",
-          ),
-      }),
-    )
-    .max(4)
-    .describe(
-      "Sizes you are committing to, written BEFORE the code and checked against the model " +
-        "after it builds. Only for numbers that actually matter — one they asked for, or one " +
-        "a part has to be to work. Empty is the right answer for most builds, and always on " +
-        "an 'ask' turn.",
-    ),
   code: z
     .string()
     .describe(
@@ -290,21 +278,6 @@ A build turn without a checkpoint is an unfinished turn. However long the progra
 obvious the next move seems, you still write **look** and three **directions** — that pause
 is the whole point of working this way, and skipping it hands them a finished object and nothing to
 decide.
-
-## Say what the sizes will be, and be held to them
-Anything you put in **expectations** is measured off the finished model and checked against
-what you said. A miss comes back to you to fix, the same way a build error does.
-
-- Claim a number when it is the point: one they asked for, or one a part has to be for the
-  object to work. "85mm to fit the board." "A 40mm lid for a 40mm jar."
-- **Most builds should claim nothing.** A coaster is whatever size looks right, and a claim
-  about it is noise you can only fail. Empty is the normal answer.
-- Give a tolerance someone would accept. Half a millimeter on a size that has to fit. A
-  tolerance wide enough that nothing could fail it is not a check, and is read as one.
-- Claim only what is listed there. Wall thickness and hole diameter are not on that list
-  because they are not measured yet, and a claim that cannot be checked is worse than none.
-- These are about the object as it will stand, not about your working. The outside width,
-  the height it stands, the volume of material.
 
 ## Four different pieces of writing
 These are not interchangeable, and mixing them up is the most common mistake here:
@@ -909,9 +882,8 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
     ],
     messages,
     // Effort is the supported way to trade thinking depth against time; budget_tokens is
-    // rejected outright on this model. Default is "high", which was spending three quarters
-    // of a long build inside the thinking phase.
-    output_config: { format: zodOutputFormat(DesignSchema), effort: "medium" },
+    // rejected outright on this model.
+    output_config: { format: zodOutputFormat(DesignSchema), effort: EFFORT },
   }, { signal });
 
   // Everything before the first character of the answer used to be silence. The reasoning
@@ -1035,10 +1007,6 @@ async function runDesign(body: Body, send: Send, signal: AbortSignal) {
       why: normalizeText(step.why),
     })),
     code,
-    expectations: parsed.expectations.map((expectation) => ({
-      ...expectation,
-      what: normalizeText(expectation.what),
-    })),
     requirements: parsed.requirements.map((requirement) => ({
       text: normalizeText(requirement.text),
       done: requirement.done,
