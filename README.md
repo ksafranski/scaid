@@ -60,7 +60,7 @@ Fill in `.env.local`:
 | `ANTHROPIC_MODEL` | Optional. The design pass. Defaults to `claude-opus-5`. |
 | `ANTHROPIC_DESIGN_EFFORT` | Optional. How long the design pass thinks before it writes: `low` (default), `medium` or `high`. The biggest cost and latency knob here — turn it up if a complicated build comes back worse. |
 | `ANTHROPIC_REPAIR_MODEL` | Optional. The repair pass, which fixes a named fault in code that already exists. Defaults to `claude-sonnet-5` — a narrower job than designing, with the compiler's own message to work from. |
-| `SIGNUP_CODE` | Optional. Beta signup gate; defaults to `scaidtester`. |
+| `SIGNUP_CODE` | The beta signup gate. Required — unset refuses every signup, by design: there's no default in the source, so publishing it can't hand out a working code. |
 
 Then:
 
