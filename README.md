@@ -338,7 +338,6 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/app/scad-view`, `src/components/ScadView.tsx` | The live view: code and model, nothing else |
 | `src/lib/scadFragment.ts`, `src/hooks/useScadSource.ts` | The program packed into the URL, and unpacked without a reload |
 | `src/hooks/useWatchedFile.ts`, `src/lib/handleStore.ts` | The opt-in file watch, for editors that aren't Claude |
-| `plugins/scad-view`, `.claude-plugin/marketplace.json` | The Claude Code plugin, and the marketplace serving it |
 
 ## Live view: a Claude Code plugin
 
@@ -346,13 +345,18 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 zoom, cut it open, measure straight off the surface with snapping to corners. It's the
 studio's viewer with the studio removed — no chat, no agent, no account, no saving.
 
+The plugin that drives it lives in [its own repo][cs], with a standalone copy of this viewer
+— so installing it doesn't clone Scaid, and the viewer can be hosted on its own.
+
 ```
-/plugin marketplace add ksafranski/scaid
-/plugin install scad-view@scaid
+/plugin marketplace add ksafranski/claude-scad
+/plugin install scad-view@claude-scad
 /scad-view
 ```
 
-Installing asks where Scaid is running; it defaults to the hosted instance. After that,
+[cs]: https://github.com/ksafranski/claude-scad
+
+Installing asks where the viewer is; point it here to use this deployment. After that,
 `/scad-view` finds the most recently edited `.scad` in the project — or takes a path, as
 `/scad-view parts/lid.scad` — and opens it in Claude Code's built-in browser pane. Every
 `.scad` Claude writes from then on refreshes that pane on its own.
@@ -377,13 +381,12 @@ megabytes of OpenSCAD WebAssembly stay warm and the camera stays exactly where y
 
 | Piece | What it does |
 | --- | --- |
-| `plugins/scad-view/scripts/view.mjs` | Finds the file, packs it into a URL. Also the hook that refreshes on every write |
-| `plugins/scad-view/hooks/hooks.json` | Fires that hook after Write, Edit and MultiEdit |
-| `src/lib/scadFragment.ts` | Unpacks it in the browser, via `DecompressionStream` |
+| `src/lib/scadFragment.ts` | Unpacks the program in the browser, via `DecompressionStream` |
 | `src/hooks/useScadSource.ts` | Listens for `hashchange`, so a rebuild never reloads the page |
 
-The hook stays quiet until `/scad-view` has been run in that project, so it never pushes a
-link into a conversation that didn't ask for one.
+The packing end — and the hook that refreshes the pane after every write — lives in
+[claude-scad][cs]. The hook stays quiet until `/scad-view` has been run in that project, so it
+never pushes a link into a conversation that didn't ask for one.
 
 ### Watching a file instead
 

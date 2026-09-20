@@ -4,8 +4,8 @@ import { Eye, FileArrowUp, Warning } from "@phosphor-icons/react";
 import { CopyBlock } from "./CopyBlock";
 import type { ScadSource } from "@/hooks/useScadSource";
 
-/** Where the Claude Code plugin lives. The repo is its own marketplace. */
-const MARKETPLACE = "ksafranski/scaid";
+/** Where the Claude Code plugin lives — its own repo, so installing it doesn't clone Scaid. */
+const MARKETPLACE = "ksafranski/claude-scad";
 
 /**
  * What to do with an empty viewer, and what the thing is for.
@@ -47,7 +47,7 @@ export function ScadViewConnect({
           <code className="font-mono text-xs text-mist-100">/scad-view</code> whenever you want
           to see what you&rsquo;re building.
         </p>
-        <CopyBlock text={`/plugin marketplace add ${MARKETPLACE}\n/plugin install scad-view@scaid`} />
+        <CopyBlock text={`/plugin marketplace add ${MARKETPLACE}\n/plugin install scad-view@claude-scad`} />
       </section>
 
       <section className="space-y-2.5 rounded-xl border border-ink-700 bg-ink-850 p-4">
