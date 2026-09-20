@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Eye, FileCode, Question, Sparkle, X } from "@phosphor-icons/react";
+import { Eye, FileCode, Question, SidebarSimple, Sparkle, X } from "@phosphor-icons/react";
 import { CodeEditor } from "./CodeEditor";
 import { Logo } from "./Logo";
 import { ModelViewer } from "./ModelViewer";
@@ -17,7 +17,8 @@ import { DEFAULT_SETTINGS, normalizePlateSize } from "@/lib/types";
 const PLATE_KEY = "scaid.scadView.plateSizeMm";
 /** Its own width, not the studio's — see usePanelWidth for why they're kept apart. */
 const WIDTH_KEY = "scaid.scadView.panelWidth";
-
+/** Whether the code panel is open. Remembered, but shut the first time you arrive. */
+const CODE_KEY = "scaid.scadView.codeOpen";
 
 
 /**
@@ -28,12 +29,17 @@ const WIDTH_KEY = "scaid.scadView.panelWidth";
  * or an editor and who just needs to see the object, so the page earns its space by being a
  * window rather than an application.
  *
- * There is no server behind it. The page reads the `.scad` off disk through folder access
- * the person granted, and the code is read-only because the file is the one true copy — an
- * editable pane here would give you somewhere to make a change the next save throws away.
+ * There is no server behind it: the program arrives in the URL's fragment, or off disk
+ * through a file the person handed over. The code is read-only either way, because the file
+ * is the one true copy — an editable pane here would only be somewhere to make a change that
+ * the next rebuild throws away.
+ *
+ * The code panel starts shut. What someone opens this for is the object, and the program is
+ * already in front of them in the editor they wrote it in.
  */
 export function ScadView() {
   const [plateSizeMm, setPlateSizeMm] = usePlateSize();
+  const [codeOpen, setCodeOpen] = useCodeOpen();
   const [showHelp, setShowHelp] = useState(false);
   const { width: panelWidth, handleProps } = usePanelWidth(WIDTH_KEY);
 
@@ -62,6 +68,10 @@ export function ScadView() {
       : null;
 
   const showing = code !== null;
+
+  // With nothing to show, the panel holds the instructions and has to be open — an empty
+  // viewer and no way in would be a dead end.
+  const panelOpen = !showing || showHelp || codeOpen;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-ink-900">
@@ -96,8 +106,33 @@ export function ScadView() {
           </span>
         )}
 
-        <div className="ml-auto flex shrink-0 items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <PlateSizePicker plateSizeMm={plateSizeMm} onChange={setPlateSizeMm} />
+
+          {showing && (
+            <button
+              onClick={() => {
+                // Reaching for the code while the instructions are up means the instructions
+                // are done with, so this swaps rather than stacking two panels.
+                if (showHelp) {
+                  setShowHelp(false);
+                  setCodeOpen(true);
+                  return;
+                }
+                setCodeOpen(!codeOpen);
+              }}
+              aria-pressed={codeOpen && !showHelp}
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                codeOpen && !showHelp
+                  ? "border-volt-500 bg-volt-500/10 text-mist-100"
+                  : "border-ink-700 text-mist-300 hover:border-ink-600 hover:text-mist-100"
+              }`}
+            >
+              <SidebarSimple size={14} weight="duotone" />
+              Code
+            </button>
+          )}
+
           <button
             onClick={() => setShowHelp((open) => !open)}
             className="flex items-center gap-1.5 rounded-lg border border-ink-700 px-2.5 py-1.5 text-xs font-semibold text-mist-300 transition hover:border-ink-600 hover:text-mist-100"
@@ -110,8 +145,11 @@ export function ScadView() {
 
       <main
         style={{ "--panel-width": `${panelWidth}px` } as React.CSSProperties}
-        className="relative z-0 grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[var(--panel-width)_1fr]"
+        className={`relative z-0 grid min-h-0 flex-1 grid-cols-1 ${
+          panelOpen ? "lg:grid-cols-[var(--panel-width)_1fr]" : ""
+        }`}
       >
+        {panelOpen && (
         <section className="relative flex min-h-0 flex-col border-ink-700 bg-ink-850 lg:border-r">
           {showHelp || !showing ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
@@ -134,6 +172,7 @@ export function ScadView() {
             className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize transition-colors hover:bg-volt-500/40 focus-visible:bg-volt-500/60 lg:block"
           />
         </section>
+        )}
 
         <section className="relative flex min-h-0 flex-col bg-ink-900">
           <ModelViewer
@@ -151,6 +190,52 @@ export function ScadView() {
       </main>
     </div>
   );
+}
+
+/**
+ * Whether the code panel is open, remembered between visits.
+ *
+ * Shut by default: the model is what this page is for, and the program is already on screen
+ * in whatever editor wrote it.
+ */
+let codeOpen: boolean | null = null;
+const codeListeners = new Set<() => void>();
+
+function readCodeOpen(): boolean {
+  codeOpen ??= (() => {
+    try {
+      return localStorage.getItem(CODE_KEY) === "true";
+    } catch {
+      return false; // private browsing can refuse storage
+    }
+  })();
+  return codeOpen;
+}
+
+const codeShutOnServer = () => false;
+
+function useCodeOpen(): [boolean, (next: boolean) => void] {
+  const open = useSyncExternalStore(subscribeCodeOpen, readCodeOpen, codeShutOnServer);
+
+  return [
+    open,
+    (next: boolean) => {
+      codeOpen = next;
+      try {
+        localStorage.setItem(CODE_KEY, String(next));
+      } catch {
+        // Not worth surfacing — it just won't be remembered.
+      }
+      codeListeners.forEach((listener) => listener());
+    },
+  ];
+}
+
+function subscribeCodeOpen(listener: () => void) {
+  codeListeners.add(listener);
+  return () => {
+    codeListeners.delete(listener);
+  };
 }
 
 /**
