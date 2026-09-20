@@ -335,6 +335,73 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/app/api/settings` | Per-account printer settings |
 | `src/lib/imageAttachment.ts` | Downscales attached pictures in the browser before upload |
 | `src/lib/scadHighlight.ts` | Small OpenSCAD tokenizer for the code viewer |
+| `src/app/scad-view`, `src/components/ScadView.tsx` | The live view: code and model, nothing else |
+| `src/lib/scadFiles.ts`, `src/lib/handleStore.ts` | Walking a picked folder for `.scad` files, and remembering it |
+| `src/hooks/useWatchedScad.ts` | The two-speed watch that follows whichever file was saved last |
+| `plugins/scad-view`, `.claude-plugin/marketplace.json` | The Claude Code plugin that pushes into it, and the marketplace serving it |
+
+## Live view: designing from a terminal
+
+`/scad-view` is the studio with everything removed except the two things you look at — the
+program on the left, the model on the right. No chat, no agent, no account, no saving. It's
+for when the designing is happening somewhere else (Claude Code, vim, a generator script)
+and all you need is a window onto what the file currently builds.
+
+Everything in the viewer still works: spin, zoom, pan, cut it open, and measure straight off
+the surface with snapping to corners.
+
+**There is no server side to it.** Open the page, point it at the folder you're working in,
+and it reads the `.scad` files off your disk through the File System Access API. Nothing is
+uploaded, nothing is stored, no account is involved, and the route is static as far as the
+host is concerned — hosting the live view costs exactly what hosting an HTML file costs.
+Access is read-only, so it can't touch what you're working on.
+
+### How the watching works
+
+| Piece | What it does |
+| --- | --- |
+| `src/lib/scadFiles.ts` | Walks the picked folder for `.scad` files and picks the one edited last |
+| `src/lib/handleStore.ts` | Keeps the directory handle in IndexedDB, so coming back is one click |
+| `src/hooks/useWatchedScad.ts` | The two-speed watch: the followed file every 400ms, the whole folder every 2s |
+
+The fast loop is a modification-time check on one file. The slow one walks the tree again to
+notice a *different* `.scad` becoming the newest, or a new one appearing — that's what makes
+the viewer follow whatever you just saved without being told. Dot-directories and the usual
+dependency and build folders are skipped, so pointing it at a whole repository is fine; in
+this repo, that's what keeps a scan out of the thousand `.scad` files in a vendored BOSL2
+checkout.
+
+Following the newest edit is the default. The file dropdown in the header pins one instead,
+for when you want to keep looking at a part while editing something else.
+
+**Chromium only.** Reading a folder from a web page needs `showDirectoryPicker`, which
+Chrome, Edge, Arc and Brave implement and Safari and Firefox do not. The page detects this
+and says so rather than failing at the picker. The rest of Scaid works everywhere.
+
+### Connecting Claude Code
+
+Optional — the viewer works with any editor, since all it does is watch files. But this repo
+is also a Claude Code plugin marketplace, and the plugin adds a `/scad-view` command that
+opens the viewer for whatever project you're in:
+
+```
+/plugin marketplace add ksafranski/scaid
+/plugin install scad-view@scaid
+/scad-view
+```
+
+Installing asks where Scaid is running. It defaults to the hosted instance; point it at
+`http://localhost:3000` when you're working on Scaid itself. `/scad-view` opens the tab with `?dir=` set to the
+project path, which is how the page remembers a different folder per project: pick it once,
+and every later visit from that project is a single click to re-grant access.
+
+The plugin is deliberately thin — there's no hook and no background process, because there's
+nothing to push:
+
+| Piece | What it does |
+| --- | --- |
+| `skills/scad-view/SKILL.md` | The `/scad-view` command |
+| `scripts/connect.mjs` | Works out the URL for this project, checks Scaid is up, opens the tab |
 
 ## Installing it
 

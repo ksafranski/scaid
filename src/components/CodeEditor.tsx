@@ -193,7 +193,13 @@ export function CodeEditor({
             // An empty editor is otherwise a blank panel with a blinking caret and no clue
             // that it's yours to type in. The text itself is transparent so the highlighted
             // layer shows through; placeholder color is set separately, so it still shows.
-            placeholder={"// Write OpenSCAD here and the model builds as you type.\n// $fn = 48;\n// cube([20, 20, 20]);"}
+            // A read-only pane says nothing: inviting someone to type in an editor that
+            // won't take it is worse than an empty panel.
+            placeholder={
+              readOnly
+                ? ""
+                : "// Write OpenSCAD here and the model builds as you type.\n// $fn = 48;\n// cube([20, 20, 20]);"
+            }
             className={`${typeStyle} absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent p-4 whitespace-pre text-transparent caret-volt-400 outline-none placeholder:text-ink-500`}
           />
           </div>

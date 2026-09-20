@@ -360,9 +360,17 @@ export function ModelViewer({
   modelRadiusMm,
   snapTargets,
   onSection,
+  emptyHint = "Describe something on the left to get started.",
 }: {
   src: string | null;
   spinning: boolean;
+  /**
+   * What to do when there's nothing on screen.
+   *
+   * The studio answer is "describe something"; the live view's is "pick a folder". Same
+   * empty stage, different next move, so the sentence is the caller's to write.
+   */
+  emptyHint?: string;
   /** The cut currently being looked through, or null for the whole model. */
   section?: Section | null;
   /**
@@ -1122,22 +1130,30 @@ export function ModelViewer({
         </div>
       )}
 
-      {src && modelShown && captureRef && (
+      {src && modelShown && (
         <div className="absolute top-5 right-5 z-30 flex items-center gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-1 shadow-lg shadow-black/40">
-          <ToolButton
-            active={tool === "region"}
-            disabled={Boolean(section)}
-            onClick={() => chooseTool(tool === "region" ? null : "region")}
-            Glyph={Lasso}
-            label={section ? "Close the cut to circle a part" : "Circle a part"}
-          />
-          <ToolButton
-            active={tool === "arrow"}
-            disabled={Boolean(section)}
-            onClick={() => chooseTool(tool === "arrow" ? null : "arrow")}
-            Glyph={ArrowUpRight}
-            label={section ? "Close the cut to point at something" : "Point at something"}
-          />
+          {/* Circling and pointing are things you do *to* a message. Without somewhere to
+              send one — the live view, which has no agent in it — they'd be drawings with
+              no reader, so they only exist when a composer is collecting them. */}
+          {captureRef && (
+            <>
+              <ToolButton
+                active={tool === "region"}
+                disabled={Boolean(section)}
+                onClick={() => chooseTool(tool === "region" ? null : "region")}
+                Glyph={Lasso}
+                label={section ? "Close the cut to circle a part" : "Circle a part"}
+              />
+              <ToolButton
+                active={tool === "arrow"}
+                disabled={Boolean(section)}
+                onClick={() => chooseTool(tool === "arrow" ? null : "arrow")}
+                Glyph={ArrowUpRight}
+                label={section ? "Close the cut to point at something" : "Point at something"}
+              />
+            </>
+          )}
+
           <ToolButton
             active={tool === "measure"}
             tone={MEASURE_COLOR}
@@ -1217,7 +1233,7 @@ export function ModelViewer({
           <div className="flex flex-col items-center">
             <Cube size={56} weight="duotone" className="text-ink-600" />
             <p className="font-display mt-5 text-lg font-semibold text-mist-500">Nothing built yet</p>
-            <p className="mt-1 text-sm text-ink-500">Describe something on the left to get started.</p>
+            <p className="mt-1 text-sm text-ink-500">{emptyHint}</p>
           </div>
         </div>
       )}
