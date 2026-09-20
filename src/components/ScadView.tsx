@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { FileArrowUp, FileCode, Question, X } from "@phosphor-icons/react";
+import { Eye, FileCode, Question, Sparkle, X } from "@phosphor-icons/react";
 import { CodeEditor } from "./CodeEditor";
 import { Logo } from "./Logo";
 import { ModelViewer } from "./ModelViewer";
@@ -10,39 +10,15 @@ import { PlateSizePicker } from "./PrintControls";
 import { ScadViewConnect } from "./ScadViewConnect";
 import { WorkingOverlay } from "./Working";
 import { useScadRenderer } from "@/hooks/useScadRenderer";
-import { useWatchedFile } from "@/hooks/useWatchedFile";
+import { useScadSource } from "@/hooks/useScadSource";
 import { usePanelWidth } from "@/hooks/usePanelWidth";
-import { useBrowserOnly } from "@/hooks/useBrowserOnly";
-import { basename } from "@/lib/scadFiles";
 import { DEFAULT_SETTINGS, normalizePlateSize } from "@/lib/types";
 
 const PLATE_KEY = "scaid.scadView.plateSizeMm";
 /** Its own width, not the studio's — see usePanelWidth for why they're kept apart. */
 const WIDTH_KEY = "scaid.scadView.panelWidth";
 
-/** The longest path worth keying storage on, so a junk query string can't fill it. */
-const MAX_PATH = 4096;
 
-/**
- * Which file this tab is for, from the `?file=` the plugin put in the URL.
- *
- * Read once and cached, because `useSyncExternalStore` compares snapshots by identity and
- * would spin on a fresh object every render. Null before hydration — the server has no URL
- * to read, and guessing would have the file store queried for the wrong path.
- */
-const UNKNOWN = { path: null, name: null } as const;
-let target: { path: string | null; name: string | null } | undefined;
-
-function readTarget(): { path: string | null; name: string | null } {
-  target ??= (() => {
-    const raw = new URLSearchParams(window.location.search).get("file");
-    const path = raw && raw.length <= MAX_PATH ? raw : null;
-    return { path, name: path ? basename(path) : null };
-  })();
-  return target;
-}
-
-const beforeHydration = () => UNKNOWN;
 
 /**
  * The live view: a program on the left, the thing it builds on the right, and nothing else.
@@ -57,12 +33,11 @@ const beforeHydration = () => UNKNOWN;
  * editable pane here would give you somewhere to make a change the next save throws away.
  */
 export function ScadView() {
-  const { path: filePath, name: fileName } = useBrowserOnly(readTarget, beforeHydration);
   const [plateSizeMm, setPlateSizeMm] = usePlateSize();
   const [showHelp, setShowHelp] = useState(false);
   const { width: panelWidth, handleProps } = usePanelWidth(WIDTH_KEY);
 
-  const watched = useWatchedFile(filePath);
+  const source = useScadSource();
   const {
     modelUrl,
     isRendering,
@@ -74,9 +49,9 @@ export function ScadView() {
     setSection,
   } = useScadRenderer(plateSizeMm);
 
-  // `code` only changes identity when the contents actually change, so this fires once per
-  // save rather than once per poll.
-  const code = watched.code;
+  // `code` only changes identity when the program actually changes, so this fires once per
+  // rebuild rather than once per poll or once per hash event.
+  const code = source.code;
   useEffect(() => {
     if (code !== null) render(code);
   }, [code, render]);
@@ -86,7 +61,7 @@ export function ScadView() {
       ? { vertices: mesh.vertices, lowestZ: metrics.lowestZ }
       : null;
 
-  const connected = watched.state === "watching" && code !== null;
+  const showing = code !== null;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-ink-900">
@@ -95,29 +70,29 @@ export function ScadView() {
           <Logo size={20} withWordmark={false} />
         </Link>
 
-        {watched.state === "watching" ? (
-          <div className="flex min-w-0 items-center gap-3">
-            <button
-              onClick={watched.choose}
-              title="Watch a different file"
-              className="flex min-w-0 shrink items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-mist-300 transition hover:bg-ink-800 hover:text-mist-100"
-            >
-              <FileCode size={14} weight="duotone" className="shrink-0 text-cyan-400" />
-              <span className="truncate font-mono">{watched.name}</span>
-            </button>
-
-            {watched.mismatch && (
-              <span className="hidden truncate text-xs text-amber-400 lg:block">
-                not {watched.mismatch}
+        {showing ? (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <FileCode size={14} weight="duotone" className="shrink-0 text-cyan-400" />
+            <span className="truncate font-mono text-xs text-mist-300">
+              {source.name ?? "untitled.scad"}
+            </span>
+            {/* Which way the program got here. They behave differently — one is refreshed by
+                Claude, the other keeps up on its own — so it's worth a word. */}
+            {source.source === "file" ? (
+              <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-400">
+                <Eye size={13} weight="duotone" />
+                watching
+              </span>
+            ) : (
+              <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-volt-300 sm:flex">
+                <Sparkle size={13} weight="duotone" />
+                from Claude Code
               </span>
             )}
           </div>
         ) : (
-          <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-mist-500">
-            <FileArrowUp size={14} weight="duotone" className="shrink-0" />
-            <span className="truncate">
-              {fileName ? `${fileName} — not open yet` : "Nothing open yet"}
-            </span>
+          <span className="truncate text-xs font-medium text-mist-500">
+            Waiting for a model
           </span>
         )}
 
@@ -138,17 +113,9 @@ export function ScadView() {
         className="relative z-0 grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[var(--panel-width)_1fr]"
       >
         <section className="relative flex min-h-0 flex-col border-ink-700 bg-ink-850 lg:border-r">
-          {showHelp || !connected ? (
+          {showHelp || !showing ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
-              <ScadViewConnect
-                state={watched.state}
-                name={watched.name}
-                wanted={fileName}
-                error={watched.error}
-                onChoose={watched.choose}
-                onGrant={watched.grant}
-                compact={connected}
-              />
+              <ScadViewConnect source={source} compact={showing} />
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col pt-3">
@@ -177,7 +144,7 @@ export function ScadView() {
             modelRadiusMm={metrics?.boundingRadius}
             snapTargets={snapTargets}
             onSection={setSection}
-            emptyHint="Open the .scad you're working on and it appears here."
+            emptyHint="Run /scad-view in Claude Code and your model appears here."
           />
           {isRendering && <WorkingOverlay label="Building the model…" />}
         </section>

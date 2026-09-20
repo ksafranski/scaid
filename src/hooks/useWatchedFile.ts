@@ -98,7 +98,14 @@ export function useWatchedFile(path: string | null): WatchedFile {
       setName(handle.name);
 
       const permission = (await handle.queryPermission?.({ mode: "read" })) ?? "prompt";
-      if (!cancelled && permission === "granted") setGranted(true);
+      if (cancelled) return;
+      if (permission === "granted") setGranted(true);
+      if (permission === "denied") {
+        // Already refused, so don't offer to reopen it — that button can only fail.
+        handleRef.current = null;
+        setName(null);
+        void forgetFile(path);
+      }
     })();
 
     return () => {
@@ -193,16 +200,34 @@ export function useWatchedFile(path: string | null): WatchedFile {
 
   const grant = useCallback(async () => {
     const handle = handleRef.current;
-    if (!handle) return;
-    const permission = (await handle.requestPermission?.({ mode: "read" })) ?? "denied";
+    if (!handle || !path) return;
+
+    let permission: PermissionState | "unavailable" = "unavailable";
+    try {
+      permission = (await handle.requestPermission?.({ mode: "read" })) ?? "unavailable";
+    } catch {
+      permission = "unavailable";
+    }
+
     if (permission === "granted") {
       seenRef.current = null;
       setGranted(true);
       setError(null);
       return;
     }
-    setError("Reading that file was declined. Open it again to start over.");
-  }, []);
+
+    // Drop the remembered handle. Without this the button goes on offering to reopen a file
+    // the browser has already refused, and asking the same rejected question again is the
+    // one thing that definitely won't work — there'd be no way back to the file dialog.
+    handleRef.current = null;
+    setName(null);
+    void forgetFile(path);
+    setError(
+      permission === "denied"
+        ? "Your browser is blocking file access for this site. Allow it in the site settings, or open the file again."
+        : "That didn't come back with permission. Open the file again to start over.",
+    );
+  }, [path]);
 
   const forget = useCallback(async () => {
     if (!path) return;

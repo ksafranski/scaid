@@ -336,53 +336,15 @@ explicitly asked for, so OpenSCAD's internal defaults don't leak yellow and gree
 | `src/lib/imageAttachment.ts` | Downscales attached pictures in the browser before upload |
 | `src/lib/scadHighlight.ts` | Small OpenSCAD tokenizer for the code viewer |
 | `src/app/scad-view`, `src/components/ScadView.tsx` | The live view: code and model, nothing else |
-| `src/lib/scadFiles.ts`, `src/lib/handleStore.ts` | The watched file's handle, and remembering it per path |
-| `src/hooks/useWatchedFile.ts` | Re-reads the file when its modification time moves |
-| `plugins/scad-view`, `.claude-plugin/marketplace.json` | The Claude Code plugin that pushes into it, and the marketplace serving it |
+| `src/lib/scadFragment.ts`, `src/hooks/useScadSource.ts` | The program packed into the URL, and unpacked without a reload |
+| `src/hooks/useWatchedFile.ts`, `src/lib/handleStore.ts` | The opt-in file watch, for editors that aren't Claude |
+| `plugins/scad-view`, `.claude-plugin/marketplace.json` | The Claude Code plugin, and the marketplace serving it |
 
-## Live view: designing from a terminal
+## Live view: a Claude Code plugin
 
-`/scad-view` is the studio with everything removed except the two things you look at — the
-program on the left, the model on the right. No chat, no agent, no account, no saving. It's
-for when the designing is happening somewhere else (Claude Code, vim, a generator script)
-and all you need is a window onto what the file currently builds.
-
-Everything in the viewer still works: spin, zoom, pan, cut it open, and measure straight off
-the surface with snapping to corners.
-
-**There is no server side to it.** Open the page, hand it the `.scad` you're working on,
-and it reads that file off your disk through the File System Access API. Nothing is
-uploaded, nothing is stored, no account is involved, and the route is static as far as the
-host is concerned — hosting the live view costs exactly what hosting an HTML file costs.
-Access is read-only and limited to the one file, so it can't touch anything else in the
-project and can't change what it's showing.
-
-### How the watching works
-
-| Piece | What it does |
-| --- | --- |
-| `src/lib/scadFiles.ts` | The handle types, and whether a file has moved since we last read it |
-| `src/lib/handleStore.ts` | Keeps the file handle in IndexedDB, keyed by its path on disk |
-| `src/hooks/useWatchedFile.ts` | Checks the file every 400ms and re-reads it when it changes |
-
-**One file, not a folder.** Granting a page read access to a project directory grants it
-everything in there — env files, keys, whatever sits beside the design — and "this viewer
-only reads `.scad`" would be a promise in code rather than a boundary the browser enforces.
-One file is a boundary the browser enforces.
-
-Which file is decided before the browser is involved: the plugin walks the project from
-Node, where reading a directory needs nobody's permission, and puts a single path in the
-URL. The page uses that path to remember the handle, so the second time you view a file it
-is one click — or none, if you told the browser to allow it on every visit.
-
-**Chromium only.** Holding onto a file so a page can watch it needs `showOpenFilePicker`,
-which Chrome, Edge, Arc and Brave implement and Safari and Firefox do not. The page detects
-this and says so rather than failing at the dialog. The rest of Scaid works everywhere.
-
-### Connecting Claude Code
-
-Optional — the viewer works with any editor, since all it does is watch a file. But this repo
-is also a Claude Code plugin marketplace, and the plugin adds a `/scad-view` command:
+`/scad-view` opens a 3D model of whatever you're building, beside the conversation. Spin it,
+zoom, cut it open, measure straight off the surface with snapping to corners. It's the
+studio's viewer with the studio removed — no chat, no agent, no account, no saving.
 
 ```
 /plugin marketplace add ksafranski/scaid
@@ -390,21 +352,51 @@ is also a Claude Code plugin marketplace, and the plugin adds a `/scad-view` com
 /scad-view
 ```
 
-Installing asks where Scaid is running. It defaults to the hosted instance; point it at
-`http://localhost:3000` when you're working on Scaid itself.
-
+Installing asks where Scaid is running; it defaults to the hosted instance. After that,
 `/scad-view` finds the most recently edited `.scad` in the project — or takes a path, as
-`/scad-view parts/lid.scad` — and opens the viewer on it in Claude Code's built-in browser
-pane, beside the conversation. One click in the file dialog, and every save after that
-rebuilds the model on its own.
+`/scad-view parts/lid.scad` — and opens it in Claude Code's built-in browser pane. Every
+`.scad` Claude writes from then on refreshes that pane on its own.
 
-The plugin is deliberately thin. There's no hook and no background process, because with the
-page reading the file there is nothing to push:
+### The program travels in the URL
+
+There is no server side to this, and nothing to click. The plugin gzips the file, base64s it
+into the URL's **fragment**, and the page decompresses it on arrival:
+
+| | |
+| --- | --- |
+| A 2.5 kB gear file | 1.4 kB of URL |
+| What the server sees | nothing — a fragment is never sent |
+| What the visitor does | nothing |
+
+A fragment is the one part of a URL a browser keeps to itself, so the code never leaves the
+machine even though the page is on a CDN. That's also why the route is static: the server has
+no part in this beyond serving the same HTML to everyone.
+
+Refreshing is a fragment change, not a page load, so the model swaps **in place** — the nine
+megabytes of OpenSCAD WebAssembly stay warm and the camera stays exactly where you left it.
 
 | Piece | What it does |
 | --- | --- |
-| `skills/scad-view/SKILL.md` | The `/scad-view` command, and where to open the page |
-| `scripts/connect.mjs` | Picks the file, checks Scaid is up, works out the URL |
+| `plugins/scad-view/scripts/view.mjs` | Finds the file, packs it into a URL. Also the hook that refreshes on every write |
+| `plugins/scad-view/hooks/hooks.json` | Fires that hook after Write, Edit and MultiEdit |
+| `src/lib/scadFragment.ts` | Unpacks it in the browser, via `DecompressionStream` |
+| `src/hooks/useScadSource.ts` | Listens for `hashchange`, so a rebuild never reloads the page |
+
+The hook stays quiet until `/scad-view` has been run in that project, so it never pushes a
+link into a conversation that didn't ask for one.
+
+### Watching a file instead
+
+If something other than Claude is doing the editing, the viewer can hold a file and rebuild
+on every save. That path uses the File System Access API, so it costs a file dialog, a
+permission, and a browser that isn't Safari or Firefox — which is exactly why it isn't the
+default any more. One file at a time, read-only, and nothing else in the project is reachable
+from the page.
+
+| Piece | What it does |
+| --- | --- |
+| `src/hooks/useWatchedFile.ts` | Re-reads the file when its modification time moves |
+| `src/lib/handleStore.ts` | Keeps the handle in IndexedDB, keyed by path, so the next visit is one click |
 
 ## Installing it
 
