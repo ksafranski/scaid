@@ -1,14 +1,14 @@
 "use client";
 
-import { FolderOpen, Lightning, Warning } from "@phosphor-icons/react";
+import { FileArrowUp, Lightning, Warning } from "@phosphor-icons/react";
 import { CopyBlock } from "./CopyBlock";
-import type { Watching } from "@/hooks/useWatchedScad";
+import type { Watching } from "@/hooks/useWatchedFile";
 
 /** Where the Claude Code plugin lives. The repo is its own marketplace. */
 const MARKETPLACE = "ksafranski/scaid";
 
 /**
- * The way in: pick a folder, and whatever `.scad` you edit in it shows up here.
+ * The way in: open one `.scad`, and every save to it rebuilds here.
  *
  * Shown while nothing is being watched, and again behind a button afterwards — the moment
  * you want to read this is usually the moment the model *isn't* updating, which is exactly
@@ -16,14 +16,18 @@ const MARKETPLACE = "ksafranski/scaid";
  */
 export function ScadViewConnect({
   state,
-  folderName,
+  name,
+  wanted,
   error,
   onChoose,
   onGrant,
   compact = false,
 }: {
   state: Watching;
-  folderName: string | null;
+  /** What's currently open, if anything. */
+  name: string | null;
+  /** What the URL asked for — the file the plugin says you're working on. */
+  wanted: string | null;
   error: string | null;
   onChoose: () => void;
   onGrant: () => void;
@@ -31,18 +35,30 @@ export function ScadViewConnect({
 }) {
   if (state === "unsupported") return <Unsupported />;
 
+  const target = wanted ?? "a .scad file";
+
   return (
     <div className={compact ? "space-y-5" : "space-y-7"}>
       {!compact && (
         <div className="space-y-2">
           <h1 className="font-display text-2xl font-semibold text-mist-100">
-            Watch a folder, see the model
+            Open a file, watch it build
           </h1>
           <p className="text-sm leading-relaxed text-mist-300">
-            Point this at the project you&rsquo;re designing in. Whichever{" "}
-            <code className="rounded bg-ink-800 px-1 py-0.5 font-mono text-xs">.scad</code> file
-            you edited most recently builds here — spin it, cut it open, measure it — and it
-            rebuilds every time you save.
+            {wanted ? (
+              <>
+                Open <code className="rounded bg-ink-800 px-1 py-0.5 font-mono text-xs">{wanted}</code>{" "}
+                and it builds here — spin it, cut it open, measure it — and it rebuilds every
+                time it&rsquo;s saved.
+              </>
+            ) : (
+              <>
+                Open the{" "}
+                <code className="rounded bg-ink-800 px-1 py-0.5 font-mono text-xs">.scad</code> you
+                are working on and it builds here — spin it, cut it open, measure it — and it
+                rebuilds every time it&rsquo;s saved.
+              </>
+            )}
           </p>
         </div>
       )}
@@ -53,8 +69,8 @@ export function ScadViewConnect({
             onClick={onGrant}
             className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-volt-500 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-volt-600"
           >
-            <FolderOpen size={18} weight="duotone" />
-            Reopen {folderName}
+            <FileArrowUp size={18} weight="duotone" />
+            Reopen {name}
           </button>
           <p className="text-xs leading-relaxed text-mist-500">
             Your browser asks again each time this page loads. Choosing &ldquo;allow on every
@@ -66,8 +82,8 @@ export function ScadViewConnect({
           onClick={onChoose}
           className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-volt-500 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-volt-600"
         >
-          <FolderOpen size={18} weight="duotone" />
-          {folderName ? "Choose a different folder" : "Choose your project folder"}
+          <FileArrowUp size={18} weight="duotone" />
+          {name ? "Open a different file" : `Open ${target}`}
         </button>
       )}
 
@@ -80,16 +96,15 @@ export function ScadViewConnect({
 
       <ul className="space-y-2.5 text-sm text-mist-300">
         <Point>
-          Nothing is uploaded. The page reads the file off your disk directly — no account, no
-          server, no copy of your work anywhere but your machine.
+          One file, not a folder. The page can only ever see the{" "}
+          <code className="font-mono text-xs text-mist-100">.scad</code> you hand it — nothing
+          else in the project is reachable from here.
         </Point>
         <Point>
-          Read-only, so nothing here can edit or overwrite what you&rsquo;re working on.
+          Nothing is uploaded. It&rsquo;s read off your disk directly, so no account, no
+          server, and no copy of your work anywhere but your machine.
         </Point>
-        <Point>
-          Dependency and build folders are skipped, so pointing it at a whole repository is
-          fine.
-        </Point>
+        <Point>Read-only, so nothing here can edit or overwrite what you&rsquo;re working on.</Point>
       </ul>
 
       <div className="space-y-2 rounded-xl border border-ink-700 bg-ink-850 p-4">
@@ -99,8 +114,8 @@ export function ScadViewConnect({
         </h2>
         <p className="text-sm leading-relaxed text-mist-300">
           A plugin adds a <code className="font-mono text-xs text-mist-100">/scad-view</code>{" "}
-          command that opens this page for whatever project you&rsquo;re in, and remembers the
-          folder per project.
+          command that opens this on whichever file you&rsquo;re working on, and remembers it so
+          the next time is one click.
         </p>
         <CopyBlock text={`/plugin marketplace add ${MARKETPLACE}\n/plugin install scad-view@scaid`} />
       </div>
@@ -118,8 +133,8 @@ function Point({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Firefox and Safari have no way to grant a page a folder, and there's no polyfill for it —
- * so this says which browsers work rather than failing at the picker.
+ * Firefox and Safari have no way to hand a page a file it can keep watching, and there's no
+ * polyfill for it — so this says which browsers work rather than failing at the dialog.
  */
 function Unsupported() {
   return (
@@ -128,9 +143,9 @@ function Unsupported() {
         This one needs a Chromium browser
       </h1>
       <p className="text-sm leading-relaxed text-mist-300">
-        Reading a folder from a web page is only possible in Chrome, Edge, Arc, Brave and
-        friends. Safari and Firefox haven&rsquo;t implemented it, and there&rsquo;s nothing this
-        page can do to work around that.
+        Keeping hold of a file so a page can watch it for changes is only possible in Chrome,
+        Edge, Arc, Brave and friends. Safari and Firefox haven&rsquo;t implemented it, and
+        there&rsquo;s nothing this page can do to work around that.
       </p>
       <p className="text-sm leading-relaxed text-mist-300">
         Open this URL in one of those and it&rsquo;ll work. The rest of Scaid is fine in every

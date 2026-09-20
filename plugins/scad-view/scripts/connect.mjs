@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 /**
- * What `/scad-view` runs: open the live view for the project you're standing in.
+ * What `/scad-view` runs: work out which file to look at, and where to look at it.
  *
- * There's nothing to configure and nothing to pass along. The project is the working
- * directory, the address came from the plugin's own setting, and the viewer reads the
- * `.scad` files off disk itself — so this only has to work out a URL and open it.
+ * The viewer watches one `.scad` at a time, so something has to decide which — and that
+ * decision belongs here rather than in the browser. Node can read the project without
+ * asking anyone's permission; a web page can't, and shouldn't be able to. So the scan
+ * happens out here and the browser is handed a single path.
+ *
+ * Prints the URL on a line of its own, and doesn't open anything. Opening is the caller's
+ * job: inside Claude Code that means the built-in browser pane, which is nicer than
+ * throwing a window at whatever browser happens to be default.
  *
  * Always exits 0. Its output is injected into the skill, and a non-zero exit would abort
  * the whole thing rather than report the problem it found.
  */
 
 import { spawn } from "node:child_process";
-import { basename } from "node:path";
+import { readdir, stat } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 
 const args = process.argv.slice(2);
 
@@ -33,11 +39,71 @@ function host() {
     (given && !given.includes("${") ? given : null) ||
     process.env.CLAUDE_PLUGIN_OPTION_HOST ||
     process.env.SCAID_VIEW_URL ||
-    "http://localhost:3000";
+    "https://scaid.studio";
   return value.replace(/\/+$/, "");
 }
 
-/** Best-effort: on a machine without a browser this is a no-op, not a failure. */
+/**
+ * Directories never worth walking into.
+ *
+ * Dependency and build trees are enormous and contain nothing anyone is designing. The
+ * dot-directory rule matters more than the list does — it's what keeps `.git` out, and what
+ * stops a scan wading through a vendored BOSL2 checkout.
+ */
+const SKIPPED = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "vendor",
+  "coverage",
+  "__pycache__",
+  "venv",
+]);
+
+const MAX_DEPTH = 8;
+
+/** The most recently modified `.scad` under a directory, or null if there isn't one. */
+async function newestScad(root) {
+  let best = null;
+
+  async function walk(dir, depth) {
+    if (depth > MAX_DEPTH) return;
+
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory is simply not a source of candidates
+    }
+
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith(".") && !SKIPPED.has(entry.name)) await walk(full, depth + 1);
+        continue;
+      }
+      if (!entry.name.toLowerCase().endsWith(".scad")) continue;
+
+      try {
+        const info = await stat(full);
+        // Ties break on path so a folder written in one go still picks deterministically.
+        if (!best || info.mtimeMs > best.mtimeMs || (info.mtimeMs === best.mtimeMs && full < best.path)) {
+          best = { path: full, mtimeMs: info.mtimeMs };
+        }
+      } catch {
+        // Vanished between being listed and being measured.
+      }
+    }
+  }
+
+  await walk(root, 0);
+  return best?.path ?? null;
+}
+
+/** Best-effort fallback for when there's no browser pane to put this in. */
 function openInBrowser(target) {
   const opener =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
@@ -51,11 +117,17 @@ function openInBrowser(target) {
 }
 
 const at = host();
-const project = process.cwd();
-// The project path is a hint, not an instruction: the browser can't open a folder it was
-// merely told about. It's what lets the tab remember which folder goes with which project,
-// so the second visit is one click instead of a trip through a file dialog.
-const url = `${at}/scad-view?dir=${encodeURIComponent(project)}`;
+const named = args.find((value, index) => !value.startsWith("--") && args[index - 1] !== "--url");
+
+let file = named ? resolve(process.cwd(), named) : await newestScad(process.cwd());
+
+if (!file) {
+  console.log("No .scad file found in this project yet.");
+  console.log("Write one and run /scad-view again, or name one: /scad-view path/to/part.scad");
+  process.exit(0);
+}
+
+const url = `${at}/scad-view?file=${encodeURIComponent(file)}`;
 
 let up = false;
 try {
@@ -71,15 +143,15 @@ try {
 if (!up) {
   console.log(`Scaid isn't answering at ${at}.`);
   console.log("Start it, or change the address with: /plugin config scad-view");
-  console.log(`Once it's up, the live view is: ${url}`);
+  console.log(`URL: ${url}`);
   process.exit(0);
 }
 
-const opened = !args.includes("--no-open") && openInBrowser(url);
+if (args.includes("--open")) openInBrowser(url);
 
-console.log(`Live view for ${basename(project)}: ${url}`);
-console.log(opened ? "Opened it in your browser." : "Open that to watch.");
+console.log(`FILE: ${file}`);
+console.log(`URL: ${url}`);
 console.log(
-  `Choose "${basename(project)}" in the folder picker it shows. After that, every .scad saved ` +
-    "in this project rebuilds there on its own — nothing is uploaded, the page reads the files directly.",
+  `Open that URL, then click "Open ${basename(file)}" and choose that file in the dialog. ` +
+    "It only ever sees that one file, and every save to it rebuilds the model.",
 );

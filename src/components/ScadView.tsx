@@ -2,50 +2,44 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { FileCode, FolderOpen, Question, X } from "@phosphor-icons/react";
+import { FileArrowUp, FileCode, Question, X } from "@phosphor-icons/react";
 import { CodeEditor } from "./CodeEditor";
-import { Dropdown, type DropdownOption } from "./Dropdown";
 import { Logo } from "./Logo";
 import { ModelViewer } from "./ModelViewer";
 import { PlateSizePicker } from "./PrintControls";
 import { ScadViewConnect } from "./ScadViewConnect";
 import { WorkingOverlay } from "./Working";
 import { useScadRenderer } from "@/hooks/useScadRenderer";
-import { useWatchedScad } from "@/hooks/useWatchedScad";
+import { useWatchedFile } from "@/hooks/useWatchedFile";
 import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { useBrowserOnly } from "@/hooks/useBrowserOnly";
+import { basename } from "@/lib/scadFiles";
 import { DEFAULT_SETTINGS, normalizePlateSize } from "@/lib/types";
 
 const PLATE_KEY = "scaid.scadView.plateSizeMm";
 /** Its own width, not the studio's — see usePanelWidth for why they're kept apart. */
 const WIDTH_KEY = "scaid.scadView.panelWidth";
 
-/** The dropdown value meaning "whichever file was edited last", which is the default. */
-const NEWEST = "";
-
-/** The longest project path worth keying storage on, so a junk query string can't fill it. */
-const MAX_KEY = 512;
+/** The longest path worth keying storage on, so a junk query string can't fill it. */
+const MAX_PATH = 4096;
 
 /**
- * Which project this tab belongs to, from the `?dir=` the plugin put in the URL.
+ * Which file this tab is for, from the `?file=` the plugin put in the URL.
  *
  * Read once and cached, because `useSyncExternalStore` compares snapshots by identity and
  * would spin on a fresh object every render. Null before hydration — the server has no URL
- * to read, and guessing would have the folder store queried for the wrong project.
+ * to read, and guessing would have the file store queried for the wrong path.
  */
-const UNKNOWN = { key: null, name: null } as const;
-let project: { key: string; name: string | null } | undefined;
+const UNKNOWN = { path: null, name: null } as const;
+let target: { path: string | null; name: string | null } | undefined;
 
-function readProject(): { key: string | null; name: string | null } {
-  project ??= (() => {
-    const dir = new URLSearchParams(window.location.search).get("dir");
-    const path = dir && dir.length <= MAX_KEY ? dir : null;
-    return {
-      key: path ?? "default",
-      name: path ? (path.split("/").filter(Boolean).pop() ?? path) : null,
-    };
+function readTarget(): { path: string | null; name: string | null } {
+  target ??= (() => {
+    const raw = new URLSearchParams(window.location.search).get("file");
+    const path = raw && raw.length <= MAX_PATH ? raw : null;
+    return { path, name: path ? basename(path) : null };
   })();
-  return project;
+  return target;
 }
 
 const beforeHydration = () => UNKNOWN;
@@ -63,12 +57,12 @@ const beforeHydration = () => UNKNOWN;
  * editable pane here would give you somewhere to make a change the next save throws away.
  */
 export function ScadView() {
-  const { key: projectKey, name: projectName } = useBrowserOnly(readProject, beforeHydration);
+  const { path: filePath, name: fileName } = useBrowserOnly(readTarget, beforeHydration);
   const [plateSizeMm, setPlateSizeMm] = usePlateSize();
   const [showHelp, setShowHelp] = useState(false);
   const { width: panelWidth, handleProps } = usePanelWidth(WIDTH_KEY);
 
-  const watched = useWatchedScad(projectKey);
+  const watched = useWatchedFile(filePath);
   const {
     modelUrl,
     isRendering,
@@ -80,9 +74,9 @@ export function ScadView() {
     setSection,
   } = useScadRenderer(plateSizeMm);
 
-  // `current` only changes identity when the file's contents actually change, so this fires
-  // once per save rather than once per poll.
-  const code = watched.current?.code ?? null;
+  // `code` only changes identity when the contents actually change, so this fires once per
+  // save rather than once per poll.
+  const code = watched.code;
   useEffect(() => {
     if (code !== null) render(code);
   }, [code, render]);
@@ -94,11 +88,6 @@ export function ScadView() {
 
   const connected = watched.state === "watching" && code !== null;
 
-  const fileOptions: ReadonlyArray<DropdownOption<string>> = [
-    { value: NEWEST, label: "Newest edit" },
-    ...watched.files.map((file) => ({ value: file.path, label: file.path })),
-  ];
-
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-ink-900">
       <header className="flex shrink-0 items-center gap-4 border-b border-ink-700 bg-ink-850 px-4 py-2.5">
@@ -109,33 +98,26 @@ export function ScadView() {
         {watched.state === "watching" ? (
           <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={watched.chooseFolder}
-              title="Watch a different folder"
+              onClick={watched.choose}
+              title="Watch a different file"
               className="flex min-w-0 shrink items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-mist-300 transition hover:bg-ink-800 hover:text-mist-100"
             >
-              <FolderOpen size={14} weight="duotone" className="shrink-0 text-volt-300" />
-              <span className="truncate">{watched.folderName}</span>
+              <FileCode size={14} weight="duotone" className="shrink-0 text-cyan-400" />
+              <span className="truncate font-mono">{watched.name}</span>
             </button>
 
-            {watched.files.length > 0 && (
-              <Dropdown
-                label="Which file to show"
-                icon={<FileCode size={15} weight="duotone" className="text-cyan-400" />}
-                value={watched.pinned ?? NEWEST}
-                options={fileOptions}
-                onChange={(next) => watched.pin(next === NEWEST ? null : next)}
-              />
-            )}
-
-            {watched.current && (
-              <span className="hidden truncate font-mono text-xs text-ink-500 lg:block">
-                {watched.current.path}
+            {watched.mismatch && (
+              <span className="hidden truncate text-xs text-amber-400 lg:block">
+                not {watched.mismatch}
               </span>
             )}
           </div>
         ) : (
-          <span className="truncate text-xs font-medium text-mist-500">
-            {projectName ? `Not watching ${projectName} yet` : "Nothing being watched yet"}
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-mist-500">
+            <FileArrowUp size={14} weight="duotone" className="shrink-0" />
+            <span className="truncate">
+              {fileName ? `${fileName} — not open yet` : "Nothing open yet"}
+            </span>
           </span>
         )}
 
@@ -160,9 +142,10 @@ export function ScadView() {
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
               <ScadViewConnect
                 state={watched.state}
-                folderName={watched.folderName}
+                name={watched.name}
+                wanted={fileName}
                 error={watched.error}
-                onChoose={watched.chooseFolder}
+                onChoose={watched.choose}
                 onGrant={watched.grant}
                 compact={connected}
               />
@@ -194,7 +177,7 @@ export function ScadView() {
             modelRadiusMm={metrics?.boundingRadius}
             snapTargets={snapTargets}
             onSection={setSection}
-            emptyHint="Pick the folder you're designing in and your newest .scad appears here."
+            emptyHint="Open the .scad you're working on and it appears here."
           />
           {isRendering && <WorkingOverlay label="Building the model…" />}
         </section>
